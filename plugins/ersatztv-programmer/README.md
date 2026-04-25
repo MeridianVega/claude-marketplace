@@ -45,6 +45,7 @@ A minimal `examples/docker-compose.yml` is included for a one-shot Next + Jellyf
 | Skill | `setup` | First-run procedure. Captures your media-server connection, ErsatzTV paths, and channel preferences. Optionally registers the daily routine. |
 | Skill | `reference` | Pinned schema references for `playout.json`, `channel.json`, and `lineup.json`. |
 | Skill | `audit` | Migration helper. Compares an existing ErsatzTV Legacy install against the Next-based setup and reports gaps. |
+| Skill | `knowledge` | Senior-engineer mental model: project history, repo layout, disk paths, debugging routes, upstream entry points. Loads on "where does X live" / "why is Y broken" questions. |
 | Agent | `programmer` | Specialized scheduling subagent for multi-channel work. |
 | Command | `/program` | Build or rebuild a channel manually. |
 | Command | `/setup` | Run the first-run wizard. Opt into a routine here if you want one. |

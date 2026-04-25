@@ -13,6 +13,10 @@ services:
     image: ghcr.io/ersatztv/next:latest
     container_name: ersatztv-next
     restart: unless-stopped
+    # pull_policy: always means each `docker compose up -d` re-pulls
+    # the :latest tag. Combined with the optional Watchtower service
+    # below, the stack tracks upstream Next without manual intervention.
+    pull_policy: always
     ports:
       - "${ERSATZTV_PORT:-18409}:8409"
     volumes:
@@ -26,6 +30,7 @@ services:
     image: lscr.io/linuxserver/jellyfin:latest
     container_name: jellyfin
     restart: unless-stopped
+    pull_policy: always
     ports:
       - "${JELLYFIN_PORT:-18096}:8096"
     environment:
@@ -35,3 +40,20 @@ services:
     volumes:
       - ./config/jellyfin:/config
       - ./media:/data/media:ro
+
+  # Optional: Watchtower auto-pulls + recreates containers when their
+  # base image gets a new tag. Uncomment to enable. Default cadence:
+  # 4 AM local time. Cleans up old image layers after each successful
+  # update (`--cleanup`).
+  #
+  # watchtower:
+  #   image: containrrr/watchtower:latest
+  #   container_name: watchtower
+  #   restart: unless-stopped
+  #   environment:
+  #     TZ: "${TZ:-UTC}"
+  #     WATCHTOWER_CLEANUP: "true"
+  #     WATCHTOWER_SCHEDULE: "0 0 4 * * *"
+  #     WATCHTOWER_INCLUDE_RESTARTING: "true"
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock

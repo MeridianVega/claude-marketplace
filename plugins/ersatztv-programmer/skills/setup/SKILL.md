@@ -29,15 +29,186 @@ Detect the OS at the start of setup and use the right path. Do not hard-code one
 
 Each step is a question, a confirmation, and a write. Save partial progress after each step so a Ctrl-C in the middle doesn't lose earlier answers.
 
-### Step 1 — Media server
+The wizard always **asks first** before doing anything system-level (installing Docker, pulling images, opening browsers). Never run install commands yourself — give copy-pasteable shell commands the user runs, so the install is auditable and reversible.
 
-Ask which media server the user runs (Jellyfin, Plex, or Emby). Confirm the corresponding MCP server is loaded in this Claude Code session (run `/mcp list` or check tool inventory). If not, stop and tell the user to install the MCP first; link them at:
+### Step 0 — System setup (skip if you already have ErsatzTV Next running)
 
-- Jellyfin: `Jellyfish-AI/jellyfin-mcp` or `jellyfin-mcp` on PyPI.
-- Plex: any current `plex-mcp` distribution.
-- Emby: any current `emby-mcp` distribution.
+Ask the user one question: **"Do you already have ErsatzTV Next running and reachable, or do you need help getting it set up?"**
 
-If the MCP is loaded, ask for the base URL the MCP is configured against and confirm the connection works by issuing a small probe query (e.g., list libraries). Record:
+- **Already running** → skip to step 1.
+- **Need help** → walk through 0a → 0d below.
+
+#### 0a. Docker
+
+Detect whether `docker` is on PATH (`command -v docker`). If yes, verify it's actually working with `docker run --rm hello-world` and confirm a successful exit. If no:
+
+> **Install Docker.** Pick the right one for your OS:
+>
+> - **macOS (Apple Silicon or Intel)** — install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop/). Free for personal and small-business use. Open the downloaded `.dmg`, drag Docker to Applications, launch it, accept the system extension prompts. After it finishes initializing (whale icon in the menu bar), open a new terminal and run `docker run --rm hello-world` to verify.
+> - **Windows** — install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/) with the WSL 2 backend. Run the installer, reboot if prompted, launch Docker Desktop, verify with `docker run --rm hello-world` in a PowerShell or WSL terminal.
+> - **Linux** — install Docker Engine following [the official docs](https://docs.docker.com/engine/install/) for your distribution. Then run the post-install steps so your user can run `docker` without `sudo`. Verify with `docker run --rm hello-world`.
+>
+> Once `docker run --rm hello-world` prints "Hello from Docker!" you're done with this step.
+
+If the user's `hello-world` test fails, surface their error message and stop the wizard. Resume after they've fixed it.
+
+#### 0b. Plan disk layout
+
+Ask the user where on disk three things should live:
+
+| Thing | Default | What goes here |
+| :--- | :--- | :--- |
+| Stack directory | `~/ersatztv-stack/` | The `docker-compose.yml` and the per-service `config/` subfolders. Easy to back up; safe to delete and recreate. |
+| Media library | `/Volumes/Media` (macOS), `/srv/media` (Linux), `D:\Media` (Windows) | Their video files. Read-only mount into the containers. Must already exist. |
+| HLS output | `/tmp/hls` (or under the stack dir) | Where ErsatzTV Next writes generated HLS segments. Ephemeral; can be wiped any time. |
+
+Don't move files. Just record paths.
+
+#### 0c. Drop in the example stack
+
+Copy the bundled `examples/stack/docker-compose.yml` from this plugin (`${CLAUDE_PLUGIN_ROOT}/examples/stack/docker-compose.yml`) into the user's stack directory. Don't blindly overwrite — if a `docker-compose.yml` already exists there, ask first.
+
+Then create a sibling `.env` so the ports stay overridable:
+
+```bash
+# ~/ersatztv-stack/.env
+TZ=America/Los_Angeles
+PUID=501
+PGID=20
+ERSATZTV_PORT=18409
+JELLYFIN_PORT=18096
+```
+
+(Run `id -u` / `id -g` for PUID / PGID on Mac and Linux. The +10000 offset on the host ports lets the stack run alongside a native install without conflict.)
+
+Show the user the resulting compose file content. Confirm before they bring it up.
+
+#### 0d. Bring the stack up
+
+```bash
+cd ~/ersatztv-stack
+docker compose up -d
+```
+
+This pulls `ghcr.io/ersatztv/next:latest` and `lscr.io/linuxserver/jellyfin:latest`. First pull on a typical home connection takes 2–5 minutes.
+
+Verify both came up:
+
+```bash
+docker compose ps
+curl -sf http://localhost:18409/channels.m3u && echo OK || echo "ErsatzTV Next not responding"
+curl -sf http://localhost:18096/web/index.html && echo OK || echo "Jellyfin not responding"
+```
+
+Open Jellyfin in a browser at `http://localhost:18096`. Walk the user through Jellyfin's own first-run wizard: create the admin user, point at their media folder, let it scan. This is Jellyfin-owned territory; do not try to script it.
+
+When Jellyfin finishes its initial scan, return to this wizard. Record:
+
+```yaml
+docker_stack:
+  managed_by_plugin: true
+  compose_file: ~/ersatztv-stack/docker-compose.yml
+  ersatztv_port: 18409
+  jellyfin_port: 18096
+```
+
+### Step 1 — Media server (recommended, not required)
+
+Ask which media server the user runs (Jellyfin, Plex, or Emby) — or whether they want to skip this step.
+
+A media-server MCP is **recommended but optional**. With it, Claude can discover content ("build me a horror channel") and resolve smart collections to file paths automatically. Without it, the user can still use `/program` by passing exact file paths or `http` URLs themselves; only the discovery loop breaks.
+
+If the user wants to skip, record:
+
+```yaml
+media_server:
+  type: none
+```
+
+…and continue to step 2.
+
+If they want to use one, check whether the corresponding MCP is already loaded in this Claude Code session (run `/mcp list` or check tool inventory).
+
+#### If the MCP is already loaded
+
+Ask for the base URL the MCP is configured against, confirm the connection works by issuing a small probe query (e.g., list libraries). Skip ahead to "Record" below.
+
+#### If the MCP is not loaded — guide the install
+
+Walk the user through these three steps. Do not run them yourself; give the user copy-pasteable commands so the install is auditable.
+
+**1. Install the MCP package.** Pick the user's media server:
+
+| Server | Recommended package | Install |
+| :--- | :--- | :--- |
+| Jellyfin | [`jellyfin-mcp` on PyPI](https://pypi.org/project/jellyfin-mcp/) | `pip install jellyfin-mcp` (or `uv pip install jellyfin-mcp`) |
+| Jellyfin (alternative) | [`Jellyfish-AI/jellyfin-mcp`](https://github.com/Jellyfish-AI/jellyfin-mcp) | Clone + `npm install`, see repo README |
+| Plex | any current `plex-mcp` distribution on PyPI / GitHub | `pip install plex-mcp` |
+| Emby | any current `emby-mcp`; Jellyfin MCPs typically work unchanged | `pip install jellyfin-mcp` and point it at your Emby base URL |
+
+**2. Get the API key/token.** Tell the user how, depending on their server.
+
+*Jellyfin:*
+
+> 1. Open Jellyfin web UI and log in as an admin.
+> 2. Open the **Dashboard** (avatar menu → Dashboard) and find **API Keys**. Newer Jellyfin builds list it directly; older builds put it under **Advanced → API Keys**.
+> 3. Click **+** to create a new key. Name it `ersatztv-programmer` so you can revoke it later.
+> 4. Copy the key. Treat it like a password — most Jellyfin builds don't display it again.
+
+*Plex:*
+
+> Plex doesn't have a dedicated API-key panel; you extract the token your existing session is using.
+>
+> 1. Sign in at https://app.plex.tv.
+> 2. Browse to any item in your library. Click the **⋮** menu → **Get Info** → **View XML**.
+> 3. In the URL of the XML page, find `X-Plex-Token=...`. The value after `=` is the token.
+> 4. Alternatively: https://plex.tv/api/v2/users/account.json with your username/password (advanced).
+
+*Emby:*
+
+> 1. Open Emby web UI and sign in as an admin.
+> 2. Click the gear icon → **Advanced** → **API Keys**.
+> 3. **New** → name it `ersatztv-programmer` → **OK**.
+> 4. Copy the key.
+
+**3. Configure the MCP and tell Claude Code about it.** Two parts.
+
+*Set environment variables* (so the MCP can authenticate when it starts):
+
+```bash
+# In ~/.zshrc (macOS default) or ~/.bashrc (Linux):
+export JELLYFIN_BASE_URL="http://192.168.1.5:8096"
+export JELLYFIN_TOKEN="your-token-from-step-2"
+```
+
+(Same shape for Plex/Emby — substitute `PLEX_BASE_URL` / `PLEX_TOKEN` etc. per the MCP's own README.)
+
+Re-source the shell or open a new terminal so the variables are visible.
+
+*Register the MCP with Claude Code.* The CLI requires an explicit transport and a `--` separator before the command. For a stdio MCP installed via pip:
+
+```bash
+claude mcp add --transport stdio \
+  --env JELLYFIN_BASE_URL="$JELLYFIN_BASE_URL" \
+  --env JELLYFIN_TOKEN="$JELLYFIN_TOKEN" \
+  jellyfin -- jellyfin-mcp
+```
+
+(Substitute `plex` / `emby` and the relevant env vars for the other servers. Confirm the binary name with `which jellyfin-mcp` after install.) Reference: <https://code.claude.com/docs/en/mcp>.
+
+Restart Claude Code, then verify with `/mcp list`. The new server should appear with its tools.
+
+#### Record
+
+Once the MCP is loaded and probed:
+
+```yaml
+media_server:
+  type: jellyfin            # or plex, emby, or none
+  base_url: http://192.168.1.5:8096
+  # token lives in the env var the MCP itself reads (e.g. JELLYFIN_TOKEN);
+  # this plugin never stores it.
+```
 
 ```yaml
 media_server:

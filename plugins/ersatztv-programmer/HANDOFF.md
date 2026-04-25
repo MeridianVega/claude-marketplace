@@ -63,7 +63,7 @@ Pick whichever matches your usage. No auto-installation of routines.
 | Thing | Path |
 | :--- | :--- |
 | Plugin source | `plugins/ersatztv-programmer/` in this marketplace repo |
-| Skills | `plugins/ersatztv-programmer/skills/{schedule,setup,reference,audit}/SKILL.md` |
+| Skills | `plugins/ersatztv-programmer/skills/{schedule,setup,reference,audit,knowledge}/SKILL.md` |
 | Agents | `plugins/ersatztv-programmer/agents/programmer.md` |
 | Commands | `plugins/ersatztv-programmer/commands/program.md` (`/setup` and `/audit` are auto-created by their skills) |
 | Hooks | `plugins/ersatztv-programmer/hooks/hooks.json` |
