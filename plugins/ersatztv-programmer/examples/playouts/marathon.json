@@ -1,0 +1,34 @@
+{
+  "$schema": "https://github.com/ErsatzTV/next/blob/main/schema/playout.json",
+  "version": "https://ersatztv.org/playout/version/0.0.1",
+  "_comment": "Marathon pattern: chronological playthrough of a smart collection. Items run end-to-end with no gaps. To loop, write a new file for the next window starting where this one ends, or set channel.json playout.virtual_start to re-anchor.",
+  "items": [
+    {
+      "id": "starrcade-1995",
+      "start": "2026-04-25T00:00:00.000-07:00",
+      "finish": "2026-04-25T03:00:00.000-07:00",
+      "source": {
+        "source_type": "local",
+        "path": "/media/wrestling/wcw/1995/Starrcade.1995.mkv"
+      }
+    },
+    {
+      "id": "superbrawl-1996",
+      "start": "2026-04-25T03:00:00.000-07:00",
+      "finish": "2026-04-25T06:30:00.000-07:00",
+      "source": {
+        "source_type": "local",
+        "path": "/media/wrestling/wcw/1996/SuperBrawl.VI.mkv"
+      }
+    },
+    {
+      "id": "halloween-havoc-1996",
+      "start": "2026-04-25T06:30:00.000-07:00",
+      "finish": "2026-04-25T10:00:00.000-07:00",
+      "source": {
+        "source_type": "local",
+        "path": "/media/wrestling/wcw/1996/Halloween.Havoc.1996.mkv"
+      }
+    }
+  ]
+}

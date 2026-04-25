@@ -1,0 +1,16 @@
+{
+  "$schema": "https://github.com/ErsatzTV/next/blob/main/schema/playout.json",
+  "version": "https://ersatztv.org/playout/version/0.0.1",
+  "_comment": "Live-mirror pattern: a single playout item covering a long window pointed at an external URL. The HLS source keeps the channel alive without local storage. Pick a finish time well into the future; rotate or extend by writing a new file before this one expires.",
+  "items": [
+    {
+      "id": "iptv-org-news-mirror",
+      "start": "2026-04-25T00:00:00.000-07:00",
+      "finish": "2026-05-25T00:00:00.000-07:00",
+      "source": {
+        "source_type": "http",
+        "uri": "https://example.iptv-org/news/channel.m3u8"
+      }
+    }
+  ]
+}

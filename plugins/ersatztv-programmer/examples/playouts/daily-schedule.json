@@ -1,0 +1,60 @@
+{
+  "$schema": "https://github.com/ErsatzTV/next/blob/main/schema/playout.json",
+  "version": "https://ersatztv.org/playout/version/0.0.1",
+  "_comment": "Daily schedule pattern: fixed time slots for one day. Saturday morning cartoons 8-11 AM, then a movie block, then a sitcom block in primetime. Stub IDs and paths — programmer fills these from media-server queries.",
+  "items": [
+    {
+      "id": "saturday-cartoons-1",
+      "start": "2026-04-25T08:00:00.000-07:00",
+      "finish": "2026-04-25T08:30:00.000-07:00",
+      "source": {
+        "source_type": "local",
+        "path": "/media/tv/looney-tunes/s01e01.mkv"
+      }
+    },
+    {
+      "id": "saturday-cartoons-2",
+      "start": "2026-04-25T08:30:00.000-07:00",
+      "finish": "2026-04-25T09:00:00.000-07:00",
+      "source": {
+        "source_type": "local",
+        "path": "/media/tv/scooby-doo/s01e01.mkv"
+      }
+    },
+    {
+      "id": "saturday-cartoons-3",
+      "start": "2026-04-25T09:00:00.000-07:00",
+      "finish": "2026-04-25T11:00:00.000-07:00",
+      "source": {
+        "source_type": "local",
+        "path": "/media/movies/animated/Toy.Story.1995.mkv"
+      }
+    },
+    {
+      "id": "afternoon-bumper",
+      "start": "2026-04-25T11:00:00.000-07:00",
+      "finish": "2026-04-25T11:00:30.000-07:00",
+      "source": {
+        "source_type": "lavfi",
+        "params": "color=c=black:s=1920x1080:r=30:d=30,format=yuv420p"
+      },
+      "tracks": {
+        "audio": {
+          "source": {
+            "source_type": "lavfi",
+            "params": "anullsrc=channel_layout=stereo:sample_rate=48000:d=30"
+          }
+        }
+      }
+    },
+    {
+      "id": "afternoon-movie",
+      "start": "2026-04-25T11:00:30.000-07:00",
+      "finish": "2026-04-25T13:30:30.000-07:00",
+      "source": {
+        "source_type": "local",
+        "path": "/media/movies/family/Princess.Bride.1987.mkv"
+      }
+    }
+  ]
+}

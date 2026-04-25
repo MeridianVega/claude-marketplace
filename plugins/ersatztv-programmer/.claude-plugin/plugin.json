@@ -1,0 +1,12 @@
+{
+  "name": "ersatztv-programmer",
+  "description": "Plan, audit, and reschedule ErsatzTV Next channels from a Jellyfin or Plex library. Emits playout JSON via skills, agents, and slash commands.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Meridian Vega",
+    "email": "support@meridianvega.com"
+  },
+  "homepage": "https://github.com/MeridianVega/claude-marketplace",
+  "repository": "https://github.com/MeridianVega/claude-marketplace",
+  "license": "MIT"
+}

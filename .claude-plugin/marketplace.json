@@ -1,0 +1,24 @@
+{
+  "name": "meridianvega",
+  "owner": {
+    "name": "Meridian Vega",
+    "email": "support@meridianvega.com"
+  },
+  "metadata": {
+    "description": "Meridian Vega Claude Code plugin marketplace.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "ersatztv-programmer",
+      "source": "./plugins/ersatztv-programmer",
+      "description": "Schedule ErsatzTV Next channels from a Jellyfin / Plex library — Plan, Smart Shuffle, Live, Calendar-Based, and Seasonal modes — by emitting playout JSON.",
+      "version": "0.1.0",
+      "category": "media",
+      "tags": ["ersatztv", "jellyfin", "plex", "iptv", "scheduling", "live-tv"],
+      "author": {
+        "name": "Meridian Vega"
+      }
+    }
+  ]
+}

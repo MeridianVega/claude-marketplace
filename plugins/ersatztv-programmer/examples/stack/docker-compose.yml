@@ -1,0 +1,37 @@
+name: ersatztv-stack
+
+# Minimal one-shot stack: ErsatzTV Next + Jellyfin. Drop a lineup.json
+# and per-channel configs into ./config/ersatztv-next/ and Jellyfin will
+# index ./media/ at startup. Use this only as a reference; production
+# users typically extend with Sonarr/Radarr/Bazarr/etc.
+#
+# Host ports use a +10000 offset by default so this stack can run alongside
+# a native ErsatzTV.app or Jellyfin install on the same Mac.
+
+services:
+  ersatztv-next:
+    image: ghcr.io/ersatztv/next:latest
+    container_name: ersatztv-next
+    restart: unless-stopped
+    ports:
+      - "${ERSATZTV_PORT:-18409}:8409"
+    volumes:
+      - ./config/ersatztv-next:/config
+      - ./media:/media:ro
+    environment:
+      TZ: "${TZ:-UTC}"
+    command: ["/config/lineup.json"]
+
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    container_name: jellyfin
+    restart: unless-stopped
+    ports:
+      - "${JELLYFIN_PORT:-18096}:8096"
+    environment:
+      PUID: "${PUID:-1000}"
+      PGID: "${PGID:-1000}"
+      TZ: "${TZ:-UTC}"
+    volumes:
+      - ./config/jellyfin:/config
+      - ./media:/data/media:ro

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://github.com/ErsatzTV/next/blob/main/schema/playout.json",
+  "version": "https://ersatztv.org/playout/version/0.0.1",
+  "_comment": "Seasonal pattern: in-season window contains real items, off-season window is empty. Implementation note — a routine writes the in-season file when today's date enters the window and writes an empty {items: []} file when it exits. ErsatzTV Next streams nothing when items is empty, so the channel goes dark off-season without erroring.",
+  "items": [
+    {
+      "id": "halloween-2026-itm-01",
+      "start": "2026-10-01T18:00:00.000-07:00",
+      "finish": "2026-10-01T19:32:00.000-07:00",
+      "source": {
+        "source_type": "local",
+        "path": "/media/movies/horror/Halloween.1978.mkv"
+      }
+    },
+    {
+      "id": "halloween-2026-itm-02",
+      "start": "2026-10-01T19:32:00.000-07:00",
+      "finish": "2026-10-01T21:08:00.000-07:00",
+      "source": {
+        "source_type": "local",
+        "path": "/media/movies/horror/Hocus.Pocus.1993.mkv"
+      }
+    }
+  ]
+}
