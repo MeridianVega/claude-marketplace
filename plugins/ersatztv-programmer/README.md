@@ -99,7 +99,7 @@ All skills and slash commands are prefixed with `ersatztv-` to avoid collisions 
 
 | Name | Role |
 | :--- | :--- |
-| `programmer` | Multi-channel orchestrator (legacy — superseded by the `routine` skill due to subagent fan-out limitations; kept for backward compatibility). |
+| `programmer` | Multi-channel orchestrator. Coordinates per-channel work for ad-hoc batch builds. |
 | `subprogrammer` | Per-channel programmer. Builds and validates one channel's playout. |
 | `channel-auditor` | Reviews a single channel's freshly-written playout for correctness and curatorial quality. APPROVE / REJECT with punch list. |
 | `director` | Programming director. Scores each channel 0–100 against seven signals; awards top-3 / bottom-3 rewards (Editor's Pick EPG prefix, newly-added priority queue, "needs love" flag). Writes `state/director-picks.json`. |
@@ -203,8 +203,6 @@ Cloud routines run on Anthropic infrastructure even when your laptop is closed �
 ## Status
 
 Pre-1.0. ErsatzTV Next itself is pre-1.0 in active development; this plugin tracks upstream via the `SessionStart` hook (probes `https://github.com/ErsatzTV/next/commits/main` and the playout schema's `$id` URI). When upstream lands a feature the plugin uses a workaround for (watermarks, M3U sanitization, etc.), the plugin swaps the workaround out — usually within a session of detection.
-
-**Known limitation:** the original agent-team pattern (orchestrator agent → subprogrammer/auditor/director/final-auditor sub-agents) doesn't survive Claude's current runtime — subagents lose the Agent tool and can't fan out. Until restructure, the routine runs as **single-agent inline** (one Claude conversation does all roles end-to-end). Documented in the codebase under `feedback_agent_team_pattern`.
 
 ## License
 
