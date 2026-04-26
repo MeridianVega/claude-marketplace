@@ -128,13 +128,13 @@ Breakdown:
       }
     },
     "video": {
-      "format": "hevc",
-      "bit_depth": 10,
+      "format": "h264",
+      "bit_depth": 8,
       "width": 1920,
       "height": 1080,
-      "bitrate_kbps": 2000,
-      "buffer_kbps": 4000,
-      "accel": "",
+      "bitrate_kbps": 8000,
+      "buffer_kbps": 16000,
+      "accel": null,
       "tonemap_algorithm": "linear",
       "vaapi_device": "/dev/dri/renderD128",
       "vaapi_driver": "iHD"
@@ -147,8 +147,11 @@ Breakdown:
 | :--- | :--- | :--- |
 | `playout.folder` | yes | Absolute path. The plugin writes playout JSON files here. |
 | `playout.virtual_start` | optional, RFC3339 string \| null | Anchor the playout window to a different wall-clock time (time-shifting). Default `null`. |
+| `ffmpeg` | **yes** | The block must be present. All three sub-fields can be empty defaults: `{"ffmpeg_path": "", "ffprobe_path": "", "disabled_filters": []}` lets the container's bundled ffmpeg be auto-discovered. |
+| `normalization` | **yes** | The block must be present. Both `audio` and `video` sub-blocks required. Defaults shown above are sane (1080p H.264 8 Mbps + 192 kbps AAC stereo, software encode). |
+| `normalization.video.accel` | yes (nullable) | One of `cuda` / `qsv` / `vaapi` / `videotoolbox` / `vulkan` / `null`. **`""` (empty string) is rejected** — use `null` for software-only. ETV Next's Linux Docker container has no GPU access on macOS hosts, so `null` is the right pick there. |
 
-`ffmpeg`, `normalization`, and `vaapi_*` are runtime concerns owned by the user / their ErsatzTV Next install. The plugin does not modify these.
+**Empirical note (verified 2026-04-26 against `ghcr.io/ersatztv/next:develop`):** ETV Next rejects `channel.json` if `ffmpeg` or `normalization` blocks are missing — the schema marks them optional but the runtime requires them. The validator at `tools/playout-validate.py` only checks playout JSON; channel.json validation happens at channel-startup time. Always include both blocks when emitting `channel.json`.
 
 ## lineup.json
 
