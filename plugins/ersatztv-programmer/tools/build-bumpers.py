@@ -622,7 +622,7 @@ def pick_kind(rng: random.Random, mix: dict, is_first_primetime: bool) -> str:
     return "up_next"
 
 
-def build_for_channel(
+def plan_channel_work(
     conn: sqlite3.Connection,
     channel_num: str,
     channel_name: str,
@@ -631,107 +631,133 @@ def build_for_channel(
     mix: dict,
     out_root: Path,
     today: datetime,
-    dry_run: bool,
-) -> dict:
-    """Render bumpers for one channel. Returns counts by kind."""
-    counts = {"deadpan": 0, "up_next": 0, "block_summary": 0}
+) -> list[dict]:
+    """Plan all bumper work units for one channel — returns list of work-item dicts.
+    No rendering happens here; this just resolves library data for parallel dispatch."""
     folder = CHANNELS_DIR / channel_num / "playout"
     files = sorted(folder.glob("*.json")) if folder.is_dir() else []
-    if not files:
-        return counts
-    playout_path = files[-1]
-    with open(playout_path) as f:
+    if not files: return []
+    with open(files[-1]) as f:
         playout = json.load(f)
     items = playout.get("items", [])
-    if not items:
-        return counts
+    if not items: return []
 
     targets = find_top_of_hour_targets(items)
     primetime_targets = [(i, t) for i, t in targets if t.hour in PRIMETIME_HOURS]
-    if not primetime_targets:
-        return counts
+    if not primetime_targets: return []
 
-    chan_dir = out_root / channel_num
-    if dry_run:
-        print(f"  ch{channel_num} {channel_name}: {len(primetime_targets)} primetime targets")
-        return {k: len(primetime_targets) // 3 for k in counts}
-
-    chan_dir.mkdir(parents=True, exist_ok=True)
     rng = random.Random(f"{today.date()}-{channel_num}")
     deadpan_pool = list(voice.get("deadpan", []) or ["More to come."])
     rng.shuffle(deadpan_pool)
     deadpan_idx = 0
 
-    # Pre-resolve titles for each primetime hour for block-summary use
+    # Pre-resolve titles for each primetime hour
     hour_to_title: dict[int, tuple[str, str, datetime]] = {}
     for idx, ts in primetime_targets:
         item = items[idx]
-        if item.get("source", {}).get("source_type") != "local":
-            continue
+        if item.get("source", {}).get("source_type") != "local": continue
         l1, l2 = resolve_show_title(conn, item["source"]["path"])
         if l1:
             hour_to_title[ts.hour] = (l1, l2, ts)
 
     first_pt_hour = min(hour_to_title) if hour_to_title else None
 
+    # Pick ONE music track for all this channel's bumpers — deterministic per day, fast.
+    # Future bumpers reusing the same track is fine; cards are short and varied otherwise.
+    music = pick_music_track(conn, channel_name)
+    music_path = music[0] if music else None
+
+    chan_dir = out_root / channel_num
+    work_items = []
     for item_idx, target_start in primetime_targets:
         next_item = items[item_idx]
-        if next_item.get("source", {}).get("source_type") != "local":
-            continue
+        if next_item.get("source", {}).get("source_type") != "local": continue
         line1, line2 = resolve_show_title(conn, next_item["source"]["path"])
-        if not line1:
-            continue
-
-        music = pick_music_track(conn, channel_name)
-        if not music:
-            continue
-        music_path, _ = music
+        if not line1: continue
+        if not music_path:
+            music = pick_music_track(conn, channel_name)
+            if not music: continue
+            music_path = music[0]
 
         is_first = (first_pt_hour is not None and target_start.hour == first_pt_hour)
         kind = pick_kind(rng, mix, is_first)
-        # Hard rule: only the first primetime hour gets block-summary
         if kind == "block_summary" and not is_first:
             kind = "deadpan"
 
         dur = 18.0 if kind == "block_summary" else 15.0
         out_path = chan_dir / f"{target_start.strftime('%H%M')}-{kind}.mp4"
-        args = RenderArgs(
-            out_path=out_path,
-            channel_name=channel_name,
-            channel_num=channel_num,
-            brand=brand,
-            music_path=music_path,
-            duration_s=dur,
-        )
 
-        ok = False
+        wi = {
+            "channel_num": channel_num,
+            "channel_name": channel_name,
+            "brand": brand,
+            "music_path": str(music_path),
+            "duration_s": dur,
+            "out_path": str(out_path),
+            "kind": kind,
+            "time_text": fmt_time(target_start),
+        }
         if kind == "block_summary":
             intro = voice.get("block_summary_intro") or f"TONIGHT ON {channel_name.upper()}"
-            lineup = []
-            for h in sorted(hour_to_title):
-                t1, _t2, ts = hour_to_title[h]
-                lineup.append((fmt_time(ts), t1))
-            ok = render_block_summary(args, intro, lineup)
+            lineup = [(fmt_time(ts), t1) for h, (t1, _t2, ts) in sorted(hour_to_title.items())]
+            wi.update({"intro": intro, "lineup": lineup})
         elif kind == "deadpan":
-            line = deadpan_pool[deadpan_idx % len(deadpan_pool)]
+            wi["deadpan"] = deadpan_pool[deadpan_idx % len(deadpan_pool)]
             deadpan_idx += 1
-            ok = render_personality(args, line)
         else:
             template = voice.get("up_next_template") or "AT {time}\n{title}"
-            text = template.format(
-                time=fmt_time(target_start),
-                title=line1,
-                subtitle=line2,
-            )
+            text = template.format(time=fmt_time(target_start), title=line1, subtitle=line2)
             rows = text.split("\n")
-            l1 = rows[0] if rows else ""
-            l2 = rows[1] if len(rows) > 1 else line2
-            ok = render_up_next(args, l1, l2, fmt_time(target_start))
+            wi["line1"] = rows[0] if rows else ""
+            wi["line2"] = rows[1] if len(rows) > 1 else line2
 
-        if ok:
-            counts[kind] += 1
+        work_items.append(wi)
+    return work_items
 
-    return counts
+
+def render_work_item(wi: dict) -> tuple[str, bool]:
+    """Top-level worker function for ProcessPool. Renders ONE bumper. Returns (kind, ok)."""
+    args = RenderArgs(
+        out_path=Path(wi["out_path"]),
+        channel_name=wi["channel_name"],
+        channel_num=wi["channel_num"],
+        brand=wi["brand"],
+        music_path=wi["music_path"],
+        duration_s=wi["duration_s"],
+    )
+    kind = wi["kind"]
+    args.out_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if kind == "block_summary":
+            ok = render_block_summary(args, wi["intro"], wi["lineup"])
+        elif kind == "deadpan":
+            ok = render_personality(args, wi["deadpan"])
+        else:
+            ok = render_up_next(args, wi["line1"], wi["line2"], wi["time_text"])
+    except Exception as e:
+        print(f"  ! {wi['out_path']}: {e}", file=sys.stderr)
+        ok = False
+    return (kind, ok)
+
+
+def prune_old_bumpers(keep_days: int) -> int:
+    """Delete bumper-day folders older than `keep_days` days. Returns count removed."""
+    if not BUMPERS_ROOT.is_dir() or keep_days < 1:
+        return 0
+    today = datetime.now().date()
+    removed = 0
+    for d in BUMPERS_ROOT.iterdir():
+        if not d.is_dir() or len(d.name) != 10: continue
+        try:
+            folder_date = datetime.strptime(d.name, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        age_days = (today - folder_date).days
+        if age_days > keep_days:
+            import shutil
+            shutil.rmtree(d, ignore_errors=True)
+            removed += 1
+    return removed
 
 
 # ---------------------------------------------------------------------------
@@ -739,10 +765,17 @@ def build_for_channel(
 # ---------------------------------------------------------------------------
 
 def main() -> int:
+    import os as _os
+    from concurrent.futures import ProcessPoolExecutor, as_completed
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", help="YYYY-MM-DD (defaults to today, local).")
     ap.add_argument("--only-channel", help="Render only this channel number.")
     ap.add_argument("--dry-run", action="store_true", help="Just count what would render.")
+    ap.add_argument("--workers", type=int,
+                    default=max(1, (_os.cpu_count() or 4) - 2),
+                    help="Parallel render workers (default: cpu_count - 2).")
+    ap.add_argument("--keep-days", type=int, default=3,
+                    help="Auto-prune bumper folders older than N days (default: 3). 0 = no prune.")
     args = ap.parse_args()
 
     today = datetime.now() if not args.date else datetime.strptime(args.date, "%Y-%m-%d")
@@ -760,37 +793,74 @@ def main() -> int:
     mix = voices_doc.get("_mix", {"deadpan_weight": 60, "up_next_weight": 30, "block_summary_weight": 10})
     conn = sqlite3.connect(f"file:{JF_DB}?immutable=1", uri=True)
 
-    totals = {"deadpan": 0, "up_next": 0, "block_summary": 0}
-    rendered_channels = 0
+    # Phase A: plan all work serially (SQL queries done once on main thread)
+    all_work: list[dict] = []
+    chan_count: dict[str, int] = {}
     for ch in channels:
         num, name = ch["number"], ch["name"]
         if args.only_channel and num != args.only_channel:
             continue
         b = brand.get(name)
         v = voiced.get(name)
-        if not b or not v:
-            continue
-        counts = build_for_channel(conn, num, name, b, v, mix, out_root, today, args.dry_run)
-        n = sum(counts.values())
-        if n > 0:
-            rendered_channels += 1
-            for k in totals:
-                totals[k] += counts[k]
-            print(
-                f"  ch{num} {name}: "
-                f"{counts['deadpan']} deadpan / "
-                f"{counts['up_next']} up-next / "
-                f"{counts['block_summary']} block-summary "
-                f"{'(dry-run)' if args.dry_run else 'rendered'}"
-            )
+        if not b or not v: continue
+        items = plan_channel_work(conn, num, name, b, v, mix, out_root, today)
+        chan_count[num] = len(items)
+        all_work.extend(items)
+
+    if args.dry_run:
+        print(f"DRY RUN: {len(all_work)} bumpers across {sum(1 for v in chan_count.values() if v>0)} channels")
+        for num, n in sorted(chan_count.items(), key=lambda x: int(x[0])):
+            if n > 0: print(f"  ch{num}: {n} bumpers")
+        return 0
+
+    # Phase B: parallel render
+    totals = {"deadpan": 0, "up_next": 0, "block_summary": 0}
+    if not all_work:
+        print("nothing to render")
+        return 0
+
+    print(f"rendering {len(all_work)} bumpers across {sum(1 for v in chan_count.values() if v>0)} channels with {args.workers} workers...")
+    import time as _time
+    t0 = _time.time()
+    with ProcessPoolExecutor(max_workers=args.workers) as pool:
+        futures = [pool.submit(render_work_item, wi) for wi in all_work]
+        done_n = 0
+        for fut in as_completed(futures):
+            kind, ok = fut.result()
+            if ok:
+                totals[kind] = totals.get(kind, 0) + 1
+            done_n += 1
+            if done_n % 25 == 0 or done_n == len(futures):
+                elapsed = _time.time() - t0
+                rate = done_n / max(elapsed, 0.01)
+                eta = (len(futures) - done_n) / max(rate, 0.01)
+                print(f"  [{done_n}/{len(futures)}] {rate:.1f} cards/s, ETA {int(eta)}s")
+    rendered_channels = sum(1 for v in chan_count.values() if v > 0)
 
     grand = sum(totals.values())
+    elapsed = _time.time() - t0
     print(
         f"\nTotals across {rendered_channels} channels: "
         f"{totals['deadpan']} deadpan, {totals['up_next']} up-next, "
         f"{totals['block_summary']} block-summary "
-        f"({grand} bumpers {'planned' if args.dry_run else 'written to ' + str(out_root)})"
+        f"({grand} bumpers in {elapsed:.1f}s, written to {out_root})"
     )
+
+    # Auto-prune old day folders
+    if args.keep_days > 0:
+        removed = prune_old_bumpers(args.keep_days)
+        if removed > 0:
+            print(f"Pruned {removed} bumper folder(s) older than {args.keep_days} days.")
+
+    # Disk accounting
+    try:
+        import subprocess as _sp
+        du_today = _sp.check_output(["du", "-sh", str(out_root)], text=True).split()[0]
+        du_all   = _sp.check_output(["du", "-sh", str(BUMPERS_ROOT)], text=True).split()[0]
+        print(f"Disk: today={du_today}, all bumpers={du_all}")
+    except Exception:
+        pass
+
     return 0
 
 
