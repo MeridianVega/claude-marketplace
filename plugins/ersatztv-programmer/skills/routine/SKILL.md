@@ -151,15 +151,29 @@ Determine **PASS** vs **BLOCK**:
 If **PASS** → continue to Phase 6.
 If **BLOCK** → skip Phase 6. Include the full punch list in the summary report. Stop.
 
-### Phase 6 — Refresh Jellyfin (only if Phase 5 PASS)
+### Phase 6 — Refresh Jellyfin guide (only if Phase 5 PASS)
+
+Jellyfin's `/LiveTv/Guide/Refresh` endpoint does NOT exist on current builds (returns 404). Use the **ScheduledTasks** API with the actual task IDs:
+
+| Task | ID | What it does |
+| :--- | :--- | :--- |
+| Refresh Guide | `bea9b218c97bbf98c5dc1303bdb9a0ca` | Pulls XMLTV from configured tuner sources, repopulates the EPG. |
+| Refresh Channels | `0c9ee3a88fc15547c6852205480da1fd` | Re-reads the M3U tuner, picks up new/removed channels. |
 
 ```bash
-curl -sf -X POST "http://localhost:18096/LiveTv/Guide/Refresh" \
-  -H "X-Emby-Token: ${JELLYFIN_TOKEN}" \
-  -m 10
+JF_BASE="${JF_BASE:-http://localhost:8096}"   # native Jellyfin (Docker users: 18096)
+TOK="${JELLYFIN_TOKEN:?set in shell rc}"
+curl -sf -m 30 -X POST "$JF_BASE/ScheduledTasks/Running/bea9b218c97bbf98c5dc1303bdb9a0ca" -H "X-Emby-Token: $TOK"
+curl -sf -m 30 -X POST "$JF_BASE/ScheduledTasks/Running/0c9ee3a88fc15547c6852205480da1fd" -H "X-Emby-Token: $TOK"
 ```
 
-If the curl returns non-zero or non-2xx, the guide refresh failed but the underlying schedule is fine — log the failure and surface it; don't treat the routine as BLOCK.
+Both should return HTTP **204 No Content**. The actual scan runs asynchronously inside Jellyfin (~10–30 s); the curl just queues the task.
+
+**Fire BOTH every routine fire** — the channels refresh picks up M3U changes (e.g., a holiday channel coming back in season), and the guide refresh ingests the regenerated XMLTV. Skipping one leaves the EPG stale.
+
+If the user's Jellyfin runs on a non-default port, override `JF_BASE` in their shell. The plugin's `setup` skill captures this at install time.
+
+If a curl returns non-zero or non-2xx, the guide refresh failed but the underlying schedule is fine — log the failure and surface it; don't treat the routine as BLOCK.
 
 ### Phase 7 — Report
 
