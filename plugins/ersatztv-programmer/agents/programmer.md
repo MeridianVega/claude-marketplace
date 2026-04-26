@@ -8,7 +8,7 @@ tools:
   - Glob
   - Grep
   - Bash
-  - Agent(subprogrammer, channel-auditor, librarian)
+  - Agent(subprogrammer, channel-auditor, director, final-auditor, librarian)
 skills:
   - ersatztv-schedule
   - ersatztv-reference
@@ -70,13 +70,24 @@ Do NOT modify the playout file yourself — only the subprogrammer writes; only 
 
 After every channel is processed, the daily routine still needs:
 
-1. **Sanitize ETV Next's `channels.m3u`** — there's an upstream bug where records aren't newline-separated; strict parsers (Jellyfin included) only see the first channel. Fetch from `http://ersatztv-next:8409/iptv/channels.m3u`, ensure each `#EXTINF` line is followed by a newline before the next, and write a corrected copy to `${CONFIG_DIR}/ersatztv-next/channels.m3u` (the XMLTV sidecar serves it from the same nginx volume).
+1. **Render bumpers** — invoke `${STACK_DIR}/tools/build-bumpers.py` with today's date. The renderer reads `tools/bumper-voices.json` and emits a mix of personality / up-next / Friday-Night-Lineup–style block-summary cards per primetime hour. Splice each rendered bumper as a `local` source in the channel's playout, replacing the trailing seconds of music filler before each `:00` program.
 
-2. **Generate `xmltv.xml`** — ETV Next deliberately doesn't emit XMLTV. Walk every channel's playout JSONs (current + next 24 h), emit a single XMLTV file with `<channel>` elements (id, display-name, optional logo via `<icon>`) and `<programme>` elements per playout item (start, stop, title, optional `<category>` tags so Jellyfin's movie/news/sports/kids filters work). Write to `${CONFIG_DIR}/ersatztv-next/xmltv.xml`.
+2. **Director scoring (Phase 2.5)** — spawn the **`director`** agent. Pass the list of channel numbers that channel-auditor APPROVED. The director scores each channel 0–100 against seven signals (tentpole-in-primetime, daypart adherence, novelty, newly-added surfacing, voice-bumper coverage, source-path resolution, filler-hour compliance), ranks the lineup, picks Top-3 / Bottom-3, and writes:
+    - `${STACK_DIR}/state/director-picks.json` — today's leaderboard + reward queue.
+    - `${STACK_DIR}/state/ratings-history.json` — 30-day rolling history.
+    Capture the director's one-line note for the routine summary.
 
-3. **Refresh Jellyfin EPG** — `POST http://jellyfin:8096/LiveTv/Guide/Refresh` (with `X-Emby-Token`) so the new programming surfaces in the guide immediately.
+3. **Sanitize ETV Next's `channels.m3u`** — there's an upstream bug where records aren't newline-separated; strict parsers (Jellyfin included) only see the first channel. Fetch from `http://ersatztv-next:8409/iptv/channels.m3u`, ensure each `#EXTINF` line is followed by a newline before the next, and write a corrected copy to `${CONFIG_DIR}/ersatztv-next/channels.m3u` (the XMLTV sidecar serves it from the same nginx volume).
 
-These three are the routine's responsibility, not the per-channel subprogrammer's.
+4. **Generate `xmltv.xml`** — invoke `${STACK_DIR}/tools/build-xmltv.py` (it auto-loads `state/director-picks.json` if present). The Top-3 channels' primetime `<title>` entries get an `[Editor's Pick] ` prefix so the user sees them flagged in the Jellyfin guide. Other channels emit normally. Write to `${CONFIG_DIR}/ersatztv-next/xmltv.xml`.
+
+5. **Final-auditor — ALWAYS** — spawn the **`final-auditor`** agent before any client-facing refresh. The auditor verifies the whole stack: lineup integrity, per-channel playout exists, **filler-hour rule (no item finishes after 23:59:59 local)**, time/contiguity, source-path existence, M3U+XMLTV consistency, bumper coverage, server reachability, director-picks file present and well-formed. The auditor returns PASS or BLOCK.
+    - If **PASS** — proceed to step 6.
+    - If **BLOCK** — do NOT call Jellyfin's refresh endpoint. Surface the auditor's punch list in your summary. The user resolves the issues and re-runs the routine. Skipping this gate corrupts a downstream client.
+
+6. **Refresh Jellyfin EPG** — only if final-auditor PASSed: `POST http://jellyfin:8096/LiveTv/Guide/Refresh` (with `X-Emby-Token`) so the new programming surfaces in the guide immediately.
+
+These steps are the routine's responsibility, not the per-channel subprogrammer's.
 
 ### Phase 3 — return summary
 
@@ -84,15 +95,24 @@ Return one concise summary to the parent session. Per channel: number, name, ite
 
 ```text
 Programmed 75 channels (live: 10, music: 10, core: 35, rotating: 10, experimental: 10):
-  ✓  60 BBC News (live)              static http source — ok
-  ✓ 200 80s Synth (music)            48 items, 24h00m
-  ✓   1 Always-On (core)             32 items, 24h00m
+  ok  60 BBC News (live)              static http source
+  ok 200 80s Synth (music)            48 items, 24h00m
+  ok   1 Always-On (core)             32 items, 24h00m
   …
-  ✗  42 Slasher Marathon (core)      blocked — Jellyfin returned 0 items for tag:slasher
-  ✗  91 Format Lab (experimental)    failed (2 retries) — auditor: gap at 13:45-14:00 in attempt 2
+  --  42 Slasher Marathon (core)      blocked — Jellyfin returned 0 items for tag:slasher
+  --  91 Format Lab (experimental)    failed (2 retries) — auditor: gap at 13:45-14:00 in attempt 2
+
+Director scored 70 channels (10 out of competition).
+  Top 3:  ch1 Primetime (94), ch12 Drama (89), ch24 HBO Style (87)
+  Needs love: ch53 Western (54), ch201 90s MTV (52)
+  Director's note: "Channel 1 is on fire this week — Sunday-night
+                    HBO-vibe is locked in. Channel 53, you're showing
+                    the same five westerns three days in a row.
+                    Pick it up."
 
 Sanitized channels.m3u (added 74 missing newlines).
-Wrote xmltv.xml (75 channels, 1,847 programmes).
+Wrote xmltv.xml (75 channels, 1,847 programmes; Editor's Pick on ch1, ch12, ch24 primetime).
+Final-auditor: PASS.
 Jellyfin /LiveTv/Guide/Refresh: 200 OK.
 Next refresh window: 2026-04-27T00:00:00-04:00.
 ```
@@ -101,7 +121,9 @@ Do NOT return the full item lists, the library queries the subprogrammers ran, o
 
 ## Hard constraints
 
-- Spawn `subprogrammer`, `channel-auditor`, and (when library-thin) `librarian` via the `Agent` tool — they are agent types declared in this plugin (`agents/subprogrammer.md`, `agents/channel-auditor.md`, `agents/librarian.md`).
+- Spawn `subprogrammer`, `channel-auditor`, `final-auditor`, and (when library-thin) `librarian` via the `Agent` tool — they are agent types declared in this plugin (`agents/subprogrammer.md`, `agents/channel-auditor.md`, `agents/final-auditor.md`, `agents/librarian.md`).
+- The **final-auditor ALWAYS runs** as the last step of any daily-routine invocation, even if every per-channel build APPROVED. It catches cross-cutting issues (M3U/XMLTV mismatch, bumper splicing errors, post-bake filler-hour bleed) the channel-auditor cannot see.
+- **Filler-hour rule:** every per-channel playout for the daily routine must end ≤ today 23:59:59 local; the 00:00–01:00 hour is filler-only (branded music + bumpers, never scripted content). The next refresh would otherwise overwrite a partial program mid-watch.
 - Never auto-queue downloads. The librarian's library-thin branch always runs in `dry-run` mode from the orchestrator. Queueing is the user's call, made via `/librarian`.
 - Never modify `lineup.json` or `channel.json` directly. If a channel referenced in the request isn't in `lineup.json`, record it as `blocked` and surface to the parent.
 - Never invent file paths. Every `local` source must come from a real subprogrammer query result.

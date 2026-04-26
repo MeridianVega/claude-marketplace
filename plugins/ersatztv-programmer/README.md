@@ -1,22 +1,22 @@
 # ersatztv-programmer
 
-A Claude Code plugin that programs [ErsatzTV Next](https://github.com/ErsatzTV/next) channels from a media library.
+A Claude Code plugin that programs [ErsatzTV Next](https://github.com/ErsatzTV/next) channels from a media library — like a real network programmer, not a shuffle algorithm.
 
 ## What it does
 
-ErsatzTV Next is a transcoding and streaming engine. It consumes **playout JSON** files that describe what to play and when, and it deliberately leaves scheduling out of scope. This plugin gives Claude Code the procedures to build those playout JSON files from a Jellyfin, Plex, or Emby library, on demand, in whatever shape a channel needs.
+ErsatzTV Next is a transcoding and streaming engine. It consumes **playout JSON** files that describe what to play and when, and deliberately leaves scheduling out of scope. This plugin gives Claude Code the procedures to build those playout JSON files from a Jellyfin, Plex, or Emby library, on demand, in whatever shape a channel needs — and to do it like a network programmer would: tentpole shows in primetime during their season, daypart-aware dayfills, voice-driven branded bumpers between programs, and a daily routine that rebuilds the lineup overnight.
 
-There are no fixed channel types. A request like *"build me a horror marathon for October"* is enough; Claude resolves the library queries, orders the items, emits valid JSON, and writes it where ErsatzTV Next picks it up.
+Channels feel like real networks: HBO Style runs prestige drama Sunday nights; Adult Animation deadpans "we hope you get fired" between shows; Time Machine PPV plays the wrestling card that aired on this exact day in 1993. Bumper voice lines are per-channel personality (Adult Swim style); top-rated channels get an `[Editor's Pick]` tag in the EPG.
 
 ## How you use it — three opt-in tiers
 
 | Tier | What you do | What runs in the background | When to choose it |
 | :--- | :--- | :--- | :--- |
-| **Manual** *(default)* | Run `/program` whenever you want to build or rebuild a channel. | Nothing. ErsatzTV Next streams whatever JSON exists; channels keep playing without further action. | You program rarely, want full control, or are still figuring out what kinds of channels you want. |
-| **Routine** *(opt-in)* | Run `/setup`, choose a refresh cadence, lock in your channel preferences. | A scheduled task (Desktop or Cloud Routine) re-runs the programming once per day so each channel rotates fresh content. | You have steady patterns (daily marathons, "this week in X" channels) and want them refreshed without you remembering. |
-| **Hybrid** | Use `/program` for one-offs *and* keep a routine running for recurring channels. | Routine runs as in tier 2; ad-hoc requests run on demand. | The common case once you've used the plugin for a while. |
+| **Manual** *(default)* | Run `/ersatztv-program` whenever you want to build or rebuild a channel. | Nothing. ErsatzTV Next streams whatever JSON exists; channels keep playing without further action. | You program rarely, want full control, or are still figuring out what kinds of channels you want. |
+| **Nightly routine** *(opt-in)* | Run `/ersatztv-setup`, lock in channel preferences, register a recurring schedule. The routine fires `/ersatztv-programmer:routine` at your chosen time. | Each fire rebuilds every channel's playout for the next 24 h, scores via the **director** agent, renders voice bumpers, regenerates M3U + XMLTV, runs the **final-auditor** gate, and refreshes Jellyfin's guide on PASS. | You want a "set it and forget it" lineup that rotates fresh content nightly. |
+| **Hybrid** | Use `/ersatztv-program` for one-offs *and* keep the nightly routine running. | Routine runs as in tier 2; ad-hoc requests run on demand. | The common case once you've used the plugin for a while. |
 
-Nothing is auto-installed beyond the plugin itself. No routine is created until you explicitly run `/setup` and pick the routine tier.
+Nothing is auto-installed beyond the plugin itself. No routine fires until you explicitly opt in via `/ersatztv-setup`.
 
 ## Install
 
@@ -25,64 +25,186 @@ Nothing is auto-installed beyond the plugin itself. No routine is created until 
 /plugin install ersatztv-programmer@meridianvega
 ```
 
-That's it. After install you can immediately run `/program` to build a channel.
+That's it. After install you can immediately run `/ersatztv-program` to build a channel.
 
 ## Required environment
 
 | Component | Why |
 | :--- | :--- |
-| **ErsatzTV Next** | Runs locally or in Docker. Watches a per-channel playout folder; the plugin writes JSON files into it. |
-| **A media server MCP** | Lets Claude query your library. The plugin is library-agnostic — install whichever MCP matches your server: Jellyfin ([`Jellyfish-AI/jellyfin-mcp`](https://github.com/Jellyfish-AI/jellyfin-mcp), [`jellyfin-mcp` on PyPI](https://pypi.org/project/jellyfin-mcp/)), Plex (any current `plex-mcp` distribution), or Emby (any current `emby-mcp`; Emby's API mirrors Jellyfin's, so most Jellyfin MCPs work unchanged). Configure per the MCP's own README. ErsatzTV Next reads media directly from the filesystem, so the MCP only needs to resolve selections to file paths. |
-| **Python 3.11+** | The bundled `tools/playout-validate.py` validates emitted JSON against the Next schema. Standard library only. |
+| **ErsatzTV Next** | Runs locally or in Docker. Watches per-channel playout folders; the plugin writes JSON files into them. Pre-1.0 — track upstream via the bundled SessionStart hook. |
+| **A media library** | Jellyfin, Plex, or Emby. The plugin reads Jellyfin's SQLite directly when accessible (fastest, no MCP required); falls back to a media-server MCP if you have one configured. The user's library lives on the filesystem; ErsatzTV Next reads file paths directly. |
+| **macOS / Linux / Windows** | Plugin is OS-agnostic. The optional **launchd plist** (macOS) / **systemd timer** (Linux) / **Task Scheduler** (Windows) glue for the nightly routine is generated by `/ersatztv-setup`. |
+| **Python 3.8+** | Bundled tools (`playout-validate.py`, `build-bumpers.py`, etc.) target stdlib + standard PyPI packages. |
+| **ffmpeg** | Required for bumper rendering. The plugin's `build-bumpers.py` calls `ffmpeg` directly with `drawtext` + audio bed. |
 
 A minimal `examples/docker-compose.yml` is included for a one-shot Next + Jellyfin stack.
 
+## Architecture at a glance
+
+```
+   ┌─────────────────────────────────────┐
+   │  Cron (CronCreate session-bound)    │
+   │  or launchd plist (macOS)           │
+   │   → Run /ersatztv-programmer:routine│
+   └────────────────┬────────────────────┘
+                    │
+                    ▼
+   ┌─────────────────────────────────────┐
+   │  routine skill — single-agent inline│
+   │   Phase 0: discover lineup          │
+   │   Phase 1: program 75 channels      │
+   │     (subprogrammer + auditor roles  │
+   │      done inline; no fan-out)       │
+   │   Phase 2: director scores          │
+   │   Phase 3: render bumpers           │
+   │   Phase 4: M3U + XMLTV              │
+   │   Phase 5: final-auditor gate       │
+   │   Phase 6: Jellyfin guide refresh   │
+   └────────────────┬────────────────────┘
+                    │
+                    ▼
+   ┌─────────────────────────────────────┐
+   │  ErsatzTV Next                      │
+   │   reads channels/{N}/playout/*.json │
+   │   serves HLS via /channel/{N}.m3u8  │
+   └────────────────┬────────────────────┘
+                    │
+                    ▼
+   ┌─────────────────────────────────────┐
+   │  Jellyfin Live TV (optional)        │
+   │   tunes channels.m3u                │
+   │   reads xmltv.xml for guide         │
+   └─────────────────────────────────────┘
+```
+
 ## What the plugin contributes
 
-All skills and slash commands are prefixed with `ersatztv-` to keep them recognizable and avoid collisions with built-in Claude Code skills (e.g. the bundled `/schedule`).
+All skills and slash commands are prefixed with `ersatztv-` to avoid collisions with built-in Claude Code skills.
 
-| Surface | Name | Purpose |
+### Skills
+
+| Name | Purpose |
+| :--- | :--- |
+| `ersatztv-routine` | The nightly daily-refresh procedure. Single-agent inline orchestration: discover lineup → program every channel → director scoring → bumper render → M3U/XMLTV → final-auditor → Jellyfin refresh. |
+| `ersatztv-schedule` | Channel content scheduling — playout JSON schema, scheduling primitives (year-offset, weekly-progression, seasonal-toggle, ratings-chasing, weekly-reinvention), filler-hour rule, voice-driven bumpers. |
+| `ersatztv-setup` | First-run wizard. Walks through Docker/native install, media server, ErsatzTV paths, channel preferences, optional routine registration. |
+| `ersatztv-reference` | Pinned schema references for `playout.json`, `channel.json`, `lineup.json`. |
+| `ersatztv-audit` | Migration helper — diff an existing ErsatzTV Legacy install against the Next setup; reports gaps. |
+| `ersatztv-knowledge` | Senior-engineer mental model: project history, debugging routes, upstream tracking entry points. |
+| `ersatztv-librarian-search` | Library acquisition — search NZBGet/Sonarr/Radarr indexers for content the channels need. |
+| `ersatztv-librarian-fetch` | Library acquisition — queue downloads after dry-run review. |
+| `ersatztv-librarian-taste` | Library acquisition — taste profile / "what to add" inference. |
+
+### Agents
+
+| Name | Role |
+| :--- | :--- |
+| `programmer` | Multi-channel orchestrator (legacy — superseded by the `routine` skill due to subagent fan-out limitations; kept for backward compatibility). |
+| `subprogrammer` | Per-channel programmer. Builds and validates one channel's playout. |
+| `channel-auditor` | Reviews a single channel's freshly-written playout for correctness and curatorial quality. APPROVE / REJECT with punch list. |
+| `director` | Programming director. Scores each channel 0–100 against seven signals; awards top-3 / bottom-3 rewards (Editor's Pick EPG prefix, newly-added priority queue, "needs love" flag). Writes `state/director-picks.json`. |
+| `final-auditor` | End-of-routine sanity gate. Verifies lineup integrity, filler-hour rule, contiguity, source-path existence, M3U/XMLTV consistency, bumper coverage. Returns PASS or BLOCK; on BLOCK, the orchestrator MUST NOT trigger Jellyfin refresh. |
+| `librarian` | Library acquisition — queues downloads via NZBGet/Sonarr/Radarr based on channel-team gap reports. |
+
+### Slash commands
+
+| Command | Action |
+| :--- | :--- |
+| `/ersatztv-program` | Build or rebuild a channel manually (one-channel and few-channel requests). |
+| `/ersatztv-setup` | First-run wizard. Opt into the nightly routine here. |
+| `/ersatztv-audit` | Run the migration audit. |
+| `/ersatztv-routine` | Manually fire the nightly daily-refresh routine right now (the same procedure the cron fires). |
+| `/ersatztv-librarian` | Library-thin acquisition workflow. |
+
+### Tools (mechanical helpers)
+
+| Tool | What it does |
+| :--- | :--- |
+| `playout-validate.py` | JSON-schema validator. Runs offline; called after every playout write. |
+| `build-bumpers.py` | Voice-driven bumper renderer. Reads `bumper-voices.json` (51 channels of personality) → emits a mix of `personality` (60%, deadpan voice line) / `up_next` (30%, templated) / `block_summary` (10%, Friday-Night-Lineup style) MP4 cards per primetime hour. |
+| `build-m3u.py` | Sanitized `channels.m3u` generator. Sets `tvg-id == tvg-chno` so Jellyfin's guide binds. |
+| `build-xmltv.py` | XMLTV generator. Auto-loads `state/director-picks.json` if present; top-3 channels' primetime titles get `[Editor's Pick] ` prefix. |
+| `render-logo.py` | Per-channel branded logo renderer. Consumes typography from `channel-fonts.json`. |
+| `check-updates.sh` | SessionStart hook. Probes upstream marketplace + ErsatzTV Next schema for drift; surfaces a one-line notice when the plugin or schema is behind. |
+
+## Hard rules baked into the skill
+
+These appear in multiple plugin docs because every entry point enforces them:
+
+1. **Calendar-day windowing.** Each playout file covers `[today 00:00:00 local, tomorrow 00:00:00 local)`. Never write rolling 24h windows from "now."
+2. **Filler-hour rule.** `max(items[*].finish) ≤ today 23:59:59`. The 12:00 AM → 01:00 AM hour is filler-only — never scripted episodes or feature films. The daily routine fires at ~01:07 AM and would otherwise overwrite a partial program mid-watch.
+3. **Claude curates, scripts don't.** Playout content selection (which item plays at which time) is Claude's judgment. Mechanical work (M3U, XMLTV, bumper rendering, validation) is scripted; curation never is.
+4. **Final-auditor ALWAYS runs.** No path skips it, even if every per-channel build succeeded on the first try. Catches cross-cutting issues per-channel auditors cannot.
+5. **No Jellyfin refresh on BLOCK.** Final-auditor BLOCK → skip the guide refresh. Better to leave yesterday's guide live than push a corrupt one.
+
+## Scheduling primitives (in the schedule skill)
+
+Beyond the default "rebuild for the next 24 h" strategy, channels can opt into:
+
+- **`year-offset`** — "On This Day" / time-shifted history (e.g., the wrestling PPV that aired N years ago today).
+- **`weekly-progression`** — fixed-slot show advancement (Tuesday 9 PM = *The Leftovers*, episode advances each week).
+- **`seasonal-toggle`** — date-window content gating (Halloween in October, Christmas in December).
+- **`ratings-chasing`** — tentpole + season-window slot programming. Named anchor owns 9 PM in season; off-season fallback rotates.
+- **`weekly-reinvention`** — experimental format rotation (each week the channel reinvents itself with a new format).
+
+## Voice-driven bumpers
+
+Edit `${STACK_DIR}/tools/bumper-voices.json` to customize per-channel personality. Each channel has four pools:
+
+- **`voice`** — one-line description of the channel's personality (style guide).
+- **`deadpan`** — 5–8 short voice lines used as standalone cards. *Adult Animation example:* "We hope you get fired."
+- **`up_next_template`** — functional templated line using `{title}` / `{subtitle}` / `{time}`.
+- **`block_summary_intro`** — Friday Night Lineup banner shown at the first primetime hour.
+
+Renderer reloads on each invocation; edit the file and the next refresh picks up new lines automatically.
+
+## Setting up the nightly routine
+
+Three options, in increasing durability:
+
+### Option 1: Session-bound `CronCreate` (no setup; in-CLI)
+
+When you have a Claude Code CLI session open and want a nightly fire while you keep it running:
+
+```text
+Use CronCreate at 1:07 AM nightly with prompt "Run /ersatztv-programmer:routine".
+```
+
+Claude schedules it. Job lives in the active session, fires while the REPL is idle, auto-expires after 7 days. Re-run weekly to refresh.
+
+### Option 2: macOS launchd plist (durable, survives reboot)
+
+Generated by `/ersatztv-setup` Step 4. The wizard writes `~/Library/LaunchAgents/com.meridianvega.ersatztv-programmer.routine.plist` calling `claude --print "/ersatztv-programmer:routine"` at your chosen time. Survives Mac reboot; runs whether or not Claude is open. Equivalent steps for Linux (systemd timer) or Windows (Task Scheduler).
+
+### Option 3: Cloud routine (laptop-off operation)
+
+Cloud routines run on Anthropic infrastructure even when your laptop is closed — but **cannot read local files** (your Jellyfin DB, your stack config). Useful only if your stack is exposed via a public API the cloud routine can hit. Most users want Option 2.
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
 | :--- | :--- | :--- |
-| Skill | `ersatztv-schedule` | Loaded when scheduling work begins. Carries the playout JSON schema, file/folder layout, validation procedure, and reload signal. |
-| Skill | `ersatztv-setup` | First-run procedure. Captures your media-server connection, ErsatzTV paths, and channel preferences. Optionally registers the daily routine. |
-| Skill | `ersatztv-reference` | Pinned schema references for `playout.json`, `channel.json`, and `lineup.json`. |
-| Skill | `ersatztv-audit` | Migration helper. Compares an existing ErsatzTV Legacy install against the Next-based setup and reports gaps. |
-| Skill | `ersatztv-knowledge` | Senior-engineer mental model: project history, repo layout, disk paths, debugging routes, upstream entry points. Loads on "where does X live" / "why is Y broken" questions. |
-| Agent | `programmer` | Specialized scheduling subagent for multi-channel work. |
-| Command | `/ersatztv-program` | Build or rebuild a channel manually. |
-| Command | `/ersatztv-setup` | Run the first-run wizard. Opt into a routine here if you want one. |
-| Command | `/ersatztv-audit` | Run the migration audit. |
-| Tool | `playout-validate.py` | JSON-schema validator, runs offline. |
-| Hook | `SessionStart` update check | On session start, polls the marketplace's GitHub repo for newer commits and surfaces a one-line notice if the local plugin is behind. Suggests `/plugin marketplace update`. |
-
-## Usage
-
-After install, scheduling work flows through normal conversation or slash commands.
-
-Manual examples:
-
-> Build me a horror channel that plays my Halloween smart collection chronologically, only during October.
-
-> /program — add a marathon channel cycling through every WCW PPV from 1995 to 2001.
-
-> Mirror this iptv-org URL as channel 60.
-
-The `programmer` agent picks the right shape, queries the library, emits JSON, validates it, drops it in the playout folder, and reports back.
-
-Opt into a routine:
-
-> /setup
->
-> *(walks you through media-server config, lock in your default channels, ask whether to register a daily Desktop scheduled task or Claude Code cloud routine)*
-
-After `/setup`, the daily run rebuilds tomorrow's playout for each registered channel. You can still `/program` ad-hoc channels alongside it.
+| Channel plays a black screen with no audio | `lavfi` source params incomplete (video-only `color=...` source) | OK — ETV Next supplies silent audio for video-only lavfi. If audio is required, use a separate audio source per the schema reference. |
+| Jellyfin guide says "Program data not available" | `tvg-id` and `tvg-chno` mismatch in `channels.m3u`, or XMLTV `<channel id>` doesn't match | `tools/build-m3u.py` sets `tvg-id == tvg-chno`; `build-xmltv.py` uses the M3U's `tvg-chno` as `<channel id>`. Re-run both. |
+| Cold-start playback error on first session | ETV idle-timeout / segment cache miss | Use the `iptv-prewarm.py` sidecar — it kicks `/channel/{N}.m3u8` to warm the encoder, then proxies `/session/{N}/live.m3u8`. |
+| Final-auditor BLOCKs every night | Likely filler-hour violation or contiguity error | Read the punch list. Most common: 22:00 movie with runtime > 60 min finishing at 00:30. Cap at 60 min or move to a shorter program. |
+| Program data swap mid-watch at midnight | Calendar-day windowing violated | Playouts must end ≤ 23:59:59. The 1 AM refresh would otherwise overwrite a partial in-progress program. |
 
 ## Documentation
 
-- [`skills/schedule/SKILL.md`](./skills/schedule/SKILL.md) — schema, file layout, write procedure (`ersatztv-schedule`).
-- [`skills/setup/SKILL.md`](./skills/setup/SKILL.md) — first-run wizard procedure (`ersatztv-setup`).
-- [`skills/knowledge/SKILL.md`](./skills/knowledge/SKILL.md) — senior-engineer mental model (`ersatztv-knowledge`).
+- [`skills/routine/SKILL.md`](./skills/routine/SKILL.md) — the nightly procedure (Phase 0–6).
+- [`skills/schedule/SKILL.md`](./skills/schedule/SKILL.md) — channel content scheduling skill.
+- [`skills/setup/SKILL.md`](./skills/setup/SKILL.md) — first-run wizard procedure.
+- [`skills/knowledge/SKILL.md`](./skills/knowledge/SKILL.md) — senior-engineer mental model.
+- [`agents/`](./agents/) — agent definitions for `programmer`, `subprogrammer`, `channel-auditor`, `director`, `final-auditor`, `librarian`.
 - [`examples/playouts/`](./examples/playouts) — example playouts covering common patterns.
+- [`examples/stack/docker-compose.yml`](./examples/stack/docker-compose.yml) — minimal local stack.
+
+## Status
+
+Pre-1.0. ErsatzTV Next itself is pre-1.0 in active development; this plugin tracks upstream via the `SessionStart` hook (probes `https://github.com/ErsatzTV/next/commits/main` and the playout schema's `$id` URI). When upstream lands a feature the plugin uses a workaround for (watermarks, M3U sanitization, etc.), the plugin swaps the workaround out — usually within a session of detection.
+
+**Known limitation:** the original agent-team pattern (orchestrator agent → subprogrammer/auditor/director/final-auditor sub-agents) doesn't survive Claude's current runtime — subagents lose the Agent tool and can't fan out. Until restructure, the routine runs as **single-agent inline** (one Claude conversation does all roles end-to-end). Documented in the codebase under `feedback_agent_team_pattern`.
 
 ## License
 

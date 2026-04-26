@@ -87,6 +87,21 @@ The schema does not enforce these, but ErsatzTV Next streams break if you ignore
 - **Source paths must be absolute and reachable from inside the ErsatzTV Next process.** Matters in Docker — paths must be valid in the container's filesystem, not the host's. Cross-check the channel's `channel.json` mount mapping.
 - **Item duration should match the source's duration.** To trim, set `in_point_ms` / `out_point_ms` on the local source rather than lying about the finish time.
 
+### Calendar-day windowing + filler-hour rule (load-bearing)
+
+Each daily-routine playout file covers **today's local calendar day** — start of the file is `01:00:00 today local`, end of the file is `00:00:00 tomorrow local` (i.e. midnight at the end of today). The 12:00 AM → 01:00 AM hour is **always filler** (branded music, voice-driven bumpers, lavfi slates) — never scripted episodes or feature films.
+
+Why: the daily refresh routine fires around 01:00 local. If a program starts at 23:00 with a 90-minute runtime, it would finish at 00:30 — and when the new playout drops at 01:00 it would overwrite the 00:00–00:30 portion of that program, swapping the show on the viewer's screen mid-watch.
+
+Rules every subprogrammer must follow:
+
+1. **Window:** `[today 01:00:00, tomorrow 00:00:00)`. 23 hours of programmed content + 1 hour of filler (the closing 23:00–00:00 hour is *not* the filler hour; the 00:00–01:00 hour at the START of the file is). Wait — practically, a single playout file has both: it opens with `00:00–01:00 filler` (the previous-routine's leftover hour) and ends at `24:00`. The simpler model: **the filler hour is always 00:00–01:00 local, every day, and no on-the-hour program may finish later than 23:59:59**.
+2. **Last on-the-hour program slot is 23:00.** Any 22:00 program with runtime > 60 min must either be replaced with a shorter program OR have `out_point_ms` set so its finish ≤ 23:59:59.
+3. **No rolling 24h windows.** A playout starting "now" and ending "now+24h" is wrong. Always align to the calendar day.
+4. **The final-auditor enforces this.** `max(items[*].finish) ≤ today 23:59:59` is a hard pass/fail check; any bleed → BLOCK and the Jellyfin guide refresh is skipped.
+
+24/7 continuous channels are exempt: music channels (200–209) loop their queue across the boundary; live channels (300–309) have a single `http` source with no clean-clock break; the PPV dark-slate channel runs 24h of lavfi.
+
 ## File naming
 
 Files use **compact ISO 8601 in both date and time portions** — no `:` and no `-` anywhere except as the timezone-offset sign character. The literal example in the schema:
@@ -400,7 +415,75 @@ overlap — the first match wins); program against that theme. When no
 window matches, fall back to `default_theme`. Recorded:
 `current_season: Halloween` so daily reports show what's active.
 
-#### 4. `weekly-reinvention` — experimental format rotation
+#### 4. `ratings-chasing` — tentpole + season-window slot programming
+
+Real networks chase ratings: the highest-impact show ("tentpole") owns the
+9 PM slot during its airing season; in off-season, the slot rotates among
+secondary anchors in the same daypart character. Use this primitive on
+any `core` channel that has named tentpole shows the user wants to honor.
+
+```yaml
+- number: "12"
+  name: "Drama"
+  bucket: core
+  primitive: ratings-chasing
+  weeknight_grid:
+    primetime_lead_in: "19:00"     # lighter — sitcom or movie warmup
+    primetime_8pm:     "20:00"     # second-tier anchor
+    primetime_tentpole:"21:00"     # the high-impact slot
+    post_tentpole:     "22:00"     # edgier follow-up
+    late_fringe:       "23:00"     # rerun / talk / specials
+  slot_anchors:
+    - slot: "Tue-21"
+      primary: "The Leftovers"
+      primary_season_window: ["10-01", "12-15"]   # MM-DD; in-season
+      off_season_pool: ["The Wire", "Lost", "Boardwalk Empire"]
+    - slot: "Sun-21"
+      primary: "Westworld"
+      primary_season_window: ["04-01", "06-30"]
+      off_season_pool: ["Carnivàle", "Atlanta", "Mythic Quest"]
+```
+
+At refresh time, for each weeknight slot:
+
+1. **Detect season.** If today is within the slot's `primary_season_window`,
+   the primary anchor is **in-season** → it owns the slot. Pull the next
+   episode from `state.json[slot]['next_episode']`, advance the cursor.
+2. **Off-season fallback.** If out-of-season, rotate among
+   `off_season_pool` — pick the one whose last airing in this slot was
+   the longest ago (state.json tracks `last_aired_in_slot`). Pull its
+   next-in-queue episode, advance.
+3. **Tentpole hierarchy.** Programs in slot order by impact:
+   `lead_in (19:00)` → `8pm anchor (20:00)` → `tentpole (21:00)` →
+   `post-tentpole (22:00)` → `late-fringe (23:00)`. Don't put the
+   tentpole in fringe slots; don't put fringe content at 9 PM during
+   sweeps weeks.
+4. **Daypart characters by slot:**
+   - 19:00 — broad appeal (sitcom, newsmagazine, family-friendly hour-long).
+     Job: capture eyeballs that flow into 8 PM.
+   - 20:00 — second-tier returning series, or a strong feature opening.
+   - 21:00 — TENTPOLE. Highest-impact pick.
+   - 22:00 — edgier or more specialized; viewers stay for one more.
+   - 23:00 — late fringe; talk, specials, comedy reruns.
+5. **State persistence.** Each slot's anchor cursor lives in `state.json`:
+   ```json
+   {
+     "slot_anchors": {
+       "Tue-21": {
+         "primary": "The Leftovers",
+         "next_episode": {"season": 1, "episode": 5},
+         "last_aired_in_slot": "2026-04-22"
+       }
+     }
+   }
+   ```
+
+Final-auditor checks: the chosen anchor matches the season window for
+today; no tentpole appears in fringe slots; no anchor's
+`last_aired_in_slot` is older than 6 weeks (otherwise the channel is
+forgetting its anchors).
+
+#### 5. `weekly-reinvention` — experimental format rotation
 
 Each week the channel reinvents itself: a marathon Mondays, daily 8 PM
 movie Tuesdays, alphabetical-by-title stunt the next week. Lives in the
@@ -584,3 +667,51 @@ curl -X POST "http://localhost:18096/LiveTv/Guide/Refresh" \
 ```
 
 This is what the daily refresh routine does at the end of its run. For ad-hoc `/ersatztv-program` calls, only do this if the user is actively watching via Jellyfin's Live TV section.
+
+**Hard rule for the daily routine:** never call this endpoint until the
+**`final-auditor`** agent returns PASS. The auditor verifies the
+filler-hour rule, contiguity, source-path existence, M3U+XMLTV
+consistency, and bumper coverage. If it BLOCKs, the guide refresh is
+skipped — better to leave yesterday's guide live than push a corrupt one.
+
+## Voice-driven bumpers (Adult-Swim style)
+
+Between programs at primetime hour boundaries, render branded 15–18 s
+"bumper" cards that give the channel a personality. Three types are
+mixed per primetime hour boundary by `tools/build-bumpers.py`:
+
+| Type | Weight | Shape | Example |
+| :--- | :---: | :--- | :--- |
+| `personality` (deadpan) | 60% | Single voice line, big type, music bed | "We hope you get fired." (Adult Animation) |
+| `up_next` | 30% | Templated functional card with channel mark, NEXT label, show title, time | "next at 9 / The One With / The Embryos" (Friends) |
+| `block_summary` | 10% | Friday-Night-Lineup card with intro line + 3–4 upcoming shows | "TONIGHT ON HBO STYLE / 8 PM Westworld / 9 PM Six Feet Under / …" |
+
+Block-summary only fires at the **first primetime hour** of the channel
+(typically 19:00). Personality and up-next mix randomly across other
+primetime hour boundaries. Music bed at 25% volume from the channel's
+brand-matched genre pool.
+
+The user-facing voice file is `${STACK_DIR}/tools/bumper-voices.json`,
+keyed by channel name with four pools per channel:
+
+```json
+{
+  "_mix": {"deadpan_weight": 60, "up_next_weight": 30, "block_summary_weight": 10},
+  "channels": {
+    "Adult Animation": {
+      "voice": "Adult Swim. Irreverent, deadpan, exists.",
+      "deadpan": ["We hope you get fired.", "Channel 4. We exist."],
+      "up_next_template": "next at {time}\n{title}",
+      "block_summary_intro": "tonight on channel four\nyou're welcome"
+    }
+  }
+}
+```
+
+Splice each rendered bumper into the channel's playout as a `local`
+source replacing the trailing seconds of music filler before each `:00`
+program. Net effect: clean clock break → 15 s branded card → show
+starts on the hour.
+
+The renderer reads the voice file fresh on each invocation; edit the
+file and the next refresh picks up new lines automatically.
