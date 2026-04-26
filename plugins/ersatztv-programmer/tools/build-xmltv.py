@@ -39,7 +39,7 @@ LINEUP = STACK_DIR / "config/ersatztv-next/lineup.json"
 M3U = STACK_DIR / "config/ersatztv-next/channels.m3u"
 OUT = STACK_DIR / "config/ersatztv-next/xmltv.xml"
 DEFAULT_DIRECTOR_PICKS = STACK_DIR / "state/director-picks.json"
-EDITOR_PICK_PREFIX = "[Editor's Pick] "
+EDITOR_PICK_PREFIX = ""  # Disabled — text-prefix in EPG title was distracting; director-pick info now in summary only.
 PRIMETIME_HOURS = {19, 20, 21, 22, 23}
 
 # Jellyfin BaseItems.Type → XMLTV category. Pipe-separated values map to
