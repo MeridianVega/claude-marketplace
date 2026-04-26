@@ -159,16 +159,55 @@ docker_stack:
   live_tv_tuner_configured: true
 ```
 
-## Step 1 — Media-server MCP
+## Step 1 — Media-server access
 
-A media-server MCP lets Claude discover content during programming. Recommended but not required.
+The agent team queries the media library to make programming decisions (genres, durations, episode lists, recently-added items, etc.). Two paths, in preference order:
 
-If `/mcp list` already shows a Jellyfin/Plex/Emby MCP, confirm the base URL and skip the install. Otherwise walk through:
+### Path A — Jellyfin SQLite directly (recommended)
 
-1. **Install** — Jellyfin: `pip install jellyfin-mcp`. Plex: `pip install plex-mcp`. Emby: same Jellyfin MCP works.
-2. **API key** — Jellyfin: Dashboard → API Keys, create new, copy. Plex: extract `X-Plex-Token` from a Get Info → View XML URL. Emby: gear → Advanced → API Keys.
-3. **Env vars** — `export JELLYFIN_BASE_URL=http://localhost:18096` and `export JELLYFIN_TOKEN=...` in shell rc.
-4. **Register with Claude Code:**
+If Jellyfin is local on the same host running Claude Code, point the agents at Jellyfin's `jellyfin.db` directly. Read-only via SQLite's `?immutable=1` URI. Zero install, zero token, zero network round-trip.
+
+Default DB locations:
+
+| Environment | Path |
+| :--- | :--- |
+| macOS native | `~/Library/Application Support/jellyfin/data/jellyfin.db` |
+| `linuxserver/jellyfin` Docker (default mount) | inside the container: `/config/data/jellyfin.db`. From host with the bundled stack: `~/ersatztv-stack/config/jellyfin/data/jellyfin.db`. |
+| Bare Linux install | `/var/lib/jellyfin/data/jellyfin.db` |
+
+Confirm with the user, then verify by running:
+
+```bash
+sqlite3 "file:${JF_DB}?immutable=1" -readonly "SELECT COUNT(*) FROM BaseItems WHERE Type LIKE '%Episode%';"
+```
+
+A non-zero count confirms the path. Record:
+
+```yaml
+media_server:
+  type: jellyfin
+  sqlite_path: ~/Library/Application Support/jellyfin/data/jellyfin.db
+  # base_url + token only needed for /Library/Refresh and /LiveTv/Guide/Refresh
+  # POST calls during the daily routine; no MCP required for content discovery.
+  base_url: http://localhost:18096
+```
+
+The schedule skill's "Querying the media library" section has the SQL recipes the subprogrammer agents use. Schema essentials (Jellyfin 10.10+) are also captured in the `knowledge` skill.
+
+For Jellyfin's own `/Library/Refresh` and `/LiveTv/Guide/Refresh` POST calls during the daily routine, you do still need an admin token. Set `JELLYFIN_TOKEN` in the shell or the routine's runtime env (Dashboard → API Keys → New).
+
+### Path B — Media-server MCP (only if Jellyfin is remote)
+
+Skip this section if Path A worked. Use a media-server MCP only when:
+- Jellyfin / Plex / Emby is on a **remote** host (the agent can't read the SQLite file directly).
+- You want playback / queue / user-state operations the read-only DB doesn't expose.
+
+To install:
+
+1. **Package** — Jellyfin: `pip install jellyfin-mcp`. Plex: `pip install plex-mcp`. Emby: Jellyfin MCP works.
+2. **API key** — Jellyfin: Dashboard → API Keys → create.
+3. **Env vars** — `export JELLYFIN_BASE_URL=...` and `export JELLYFIN_TOKEN=...`.
+4. **Register**:
 
    ```bash
    claude mcp add --transport stdio \
@@ -177,16 +216,16 @@ If `/mcp list` already shows a Jellyfin/Plex/Emby MCP, confirm the base URL and 
      jellyfin -- jellyfin-mcp
    ```
 
-   Reference: <https://code.claude.com/docs/en/mcp>.
-
-Record:
+The plugin's setup skill records:
 
 ```yaml
 media_server:
   type: jellyfin
-  base_url: http://localhost:18096
-  # token lives in the env var the MCP reads; this plugin never stores it.
+  base_url: http://192.168.1.5:8096
+  # token lives in JELLYFIN_TOKEN env var; never stored here
 ```
+
+The default content-discovery path remains SQLite. MCP is the fallback for remote setups.
 
 ## Step 2 — ErsatzTV Next paths
 

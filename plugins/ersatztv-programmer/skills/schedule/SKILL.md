@@ -375,6 +375,137 @@ Earlier versions of this plugin assumed channels would split TV vs. Movies and b
 
 The user's `core` and `rotating` channels should look like real broadcast properties. The `music` bucket is the only one where a single-axis (artist, decade, mood) channel makes sense.
 
+## Querying the media library (Jellyfin SQLite, no MCP)
+
+**Default content-discovery path:** read Jellyfin's SQLite DB directly,
+read-only via `?immutable=1`. **Do not require an MCP install.** Jellyfin's
+DB has every fact a subprogrammer needs (file paths, durations, genres,
+season/episode numbers, premiere dates, studios, tags) and is local — no
+network, no token, no install.
+
+The DB lives at:
+
+| OS | Path |
+| :--- | :--- |
+| macOS native install | `~/Library/Application Support/jellyfin/data/jellyfin.db` |
+| linuxserver/jellyfin Docker | `/config/data/jellyfin.db` (inside the container) |
+| Bare Linux install | `/var/lib/jellyfin/data/jellyfin.db` |
+
+The `setup` skill captures the path in `config.yaml` under
+`media_server.sqlite_path`. The subprogrammer + agent prompts reference
+that key.
+
+### Schema essentials (Jellyfin 10.10+)
+
+The single useful table is `BaseItems`. Discriminate by `Type`:
+
+| Content kind | `Type` value |
+| :--- | :--- |
+| Movie | `MediaBrowser.Controller.Entities.Movies.Movie` |
+| TV episode | `MediaBrowser.Controller.Entities.TV.Episode` |
+| TV series | `MediaBrowser.Controller.Entities.TV.Series` |
+| TV season | `MediaBrowser.Controller.Entities.TV.Season` |
+| Audio (song) | `MediaBrowser.Controller.Entities.Audio.Audio` |
+| Music album | `MediaBrowser.Controller.Entities.Audio.MusicAlbum` |
+| Music artist | `MediaBrowser.Controller.Entities.Audio.MusicArtist` |
+
+Useful columns for programming:
+
+- **`Path`** — absolute filesystem path. Already what ETV Next + Jellyfin both see (when bind-mounts use identical host paths).
+- **`Name`** — display title.
+- **`RuntimeTicks`** — duration in 100-nanosecond ticks. Convert: `seconds = ticks / 10_000_000`.
+- **`ProductionYear`** — release year (movies); first-aired year (shows).
+- **`PremiereDate`** — RFC 3339 timestamp; ISO date for episodes' original air date.
+- **`Genres`** — pipe-separated string, e.g. `"Adventure|Comedy|Fantasy|Family"`.
+- **`Studios`** — pipe-separated.
+- **`Tags`** — pipe-separated user/auto tags.
+- **`SeriesName`**, **`SeasonName`**, **`IndexNumber`** (= episode number), **`ParentIndexNumber`** (= season number) — for episodes.
+- **`OfficialRating`** — content rating (G / PG / PG-13 / R / TV-14 / TV-MA / etc.).
+
+### Recipe queries
+
+```sql
+-- Duration in seconds, generic
+SELECT Path, RuntimeTicks / 10000000.0 AS dur_s FROM BaseItems WHERE Path = ?;
+```
+
+```sql
+-- All Friends S1 episodes in order
+SELECT Path, RuntimeTicks/10000000.0 AS dur_s, IndexNumber AS ep
+  FROM BaseItems
+ WHERE Type='MediaBrowser.Controller.Entities.TV.Episode'
+   AND SeriesName='Friends' AND ParentIndexNumber=1
+ ORDER BY IndexNumber;
+```
+
+```sql
+-- All horror movies
+SELECT Path, RuntimeTicks/10000000.0 AS dur_s, ProductionYear AS yr
+  FROM BaseItems
+ WHERE Type='MediaBrowser.Controller.Entities.Movies.Movie'
+   AND Genres LIKE '%Horror%'
+ ORDER BY ProductionYear DESC;
+```
+
+```sql
+-- "On this day" — premiere date matches today's MM-DD across any year
+SELECT Path, RuntimeTicks/10000000.0 AS dur_s, PremiereDate, Name
+  FROM BaseItems
+ WHERE PremiereDate IS NOT NULL
+   AND substr(PremiereDate, 6, 5) = strftime('%m-%d', 'now', 'localtime')
+ ORDER BY substr(PremiereDate, 1, 4);  -- year ascending
+```
+
+```sql
+-- Newest acquisitions across the whole library (last N days)
+SELECT Path, RuntimeTicks/10000000.0 AS dur_s, DateCreated, Name, Type
+  FROM BaseItems
+ WHERE DateCreated >= datetime('now', '-7 days')
+   AND Type IN (
+     'MediaBrowser.Controller.Entities.Movies.Movie',
+     'MediaBrowser.Controller.Entities.TV.Episode'
+   )
+ ORDER BY DateCreated DESC;
+```
+
+```sql
+-- All wrestling content (anything under the Wrestling library path)
+SELECT Path, RuntimeTicks/10000000.0 AS dur_s, SeriesName, Name
+  FROM BaseItems
+ WHERE Path LIKE '%/_MEDIA_LIBRARY/Wrestling/%'
+   AND Type='MediaBrowser.Controller.Entities.TV.Episode'
+ ORDER BY Path;
+```
+
+### Read-only safety
+
+Always open with `?immutable=1` so a half-running Jellyfin doesn't get its
+WAL stomped:
+
+```bash
+sqlite3 "file:${JF_DB}?immutable=1" -readonly <<'SQL'
+SELECT ...
+SQL
+```
+
+### When MCP-style structured access is preferable
+
+Reading the DB directly trades typed access for portability. Use direct
+SQL when:
+- You're inside the daily routine and need bulk queries fast.
+- The user hasn't installed an MCP.
+- You want one less moving part.
+
+Use a Jellyfin / Plex / Emby MCP when:
+- The user has it set up and is already authenticated against a remote
+  server (the MCP knows the right URL/token; the SQLite path approach
+  only works for a *local* Jellyfin install).
+- You want playback / queue / user-state operations the read-only DB
+  doesn't expose.
+
+Both paths are valid — pick what's available, prefer SQLite when the
+choice is open.
+
 ## Refreshing Jellyfin's EPG after a write
 
 Jellyfin doesn't auto-refetch the XMLTV file ErsatzTV Next serves. After writing playout JSON for any channel that's part of the Live TV tuner, hit:
