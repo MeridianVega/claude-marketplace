@@ -186,6 +186,27 @@ Determine **PASS** vs **BLOCK**:
 If **PASS** → continue to Phase 6.
 If **BLOCK** → skip Phase 6. Include the full punch list in the summary report. Stop.
 
+### Phase 4.5 — Content audit (genre + holiday strictness)
+
+After playouts are written and bumpers spliced, before XMLTV regen:
+
+```bash
+python3 "${STACK_DIR}/tools/audit-content.py"
+```
+
+The audit walks every channel's playout and rejects items that violate the per-channel genre/series rules in `tools/channel-genres.json`. Hard-fail conditions:
+
+- **Holiday content on a non-holiday channel.** Christmas movies, Halloween specials, Thanksgiving episodes — anything matching the global `path/series/title` exclusion lists. Only ch31 (Halloween), ch32 (Thanksgiving), ch33 (Christmas) may carry holiday content, and only when in-season.
+- **Blacklisted series on a channel.** E.g., preschool shows on Adult Animation; non-anime on the Anime channel.
+
+Soft warnings (`--strict` to fail on these too):
+- Off-genre (e.g., a Comedy aired on the Drama channel).
+- Item not in the channel's required-series whitelist.
+
+If ERRORs are found, the routine surgically replaces the violating items with runtime-matched non-violating alternatives from the same channel's pool (preserving slot timing). If no replacement is found, the item is swapped for `lavfi` filler.
+
+The final-auditor (Phase 5) runs `audit-content.py` again as part of its checks. Any remaining ERRORs → BLOCK; routine does not refresh the Jellyfin guide.
+
 ### Phase 6a — Restart ETV Next + per-channel stream probe
 
 ETV's hot-reload doesn't survive substantial mid-session config or playout-filename changes — sessions cache the first playout filename they see, ffmpeg processes accumulate stale `output_ts_offset` values, and `/session/{N}/live.m3u8` ends up returning empty playlists despite valid headers (clients hang on "loading"). After the routine has rewritten 75 channel.json + 75 playout JSON files, restart ETV so it re-scans the playout folder fresh:

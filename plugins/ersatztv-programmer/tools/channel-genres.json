@@ -1,6 +1,32 @@
 {
   "_comment": "Strict per-channel content filters. Used by the routine's rebuild step to ensure each channel pulls ONLY from its core content set, not adjacent genres. Format: required_genres (must match), excluded_genres (must NOT match), allowed_series (whitelist of SeriesName), excluded_series (blacklist).",
 
+  "_global_exclusions": {
+    "_comment": "Applied to EVERY channel except 31/32/33 (the holiday channels themselves). Holiday content NEVER appears outside its dedicated channel.",
+    "path_excludes": [
+      "/Halloween/", "/Christmas/", "/Thanksgiving/", "/Holiday/",
+      "/Hallmark/", "/Xmas/", "halloween", "christmas", "thanksgiving"
+    ],
+    "series_excludes": [
+      "A Christmas Story", "A Christmas Carol", "Christmas Vacation",
+      "Home Alone", "Elf", "The Polar Express", "Miracle on 34th Street",
+      "It's a Wonderful Life", "Frosty the Snowman", "Rudolph",
+      "Charlie Brown Christmas", "Charlie Brown Thanksgiving", "Halloween",
+      "Hocus Pocus", "Trick 'r Treat", "Halloweentown",
+      "Hallmark Christmas", "Lifetime Christmas", "Disney Christmas",
+      "The Nightmare Before Christmas", "Garfield's Halloween",
+      "Garfield's Thanksgiving", "It's the Great Pumpkin",
+      "Charlie Brown Christmas Tales", "Mickey's Christmas Carol",
+      "Frozen Christmas", "Olaf's Frozen Adventure"
+    ],
+    "title_substrings_excludes": [
+      "Christmas", "Xmas", "Halloween", "Thanksgiving", "Hanukkah",
+      "Easter Special", "Valentine's", "St. Patrick's", "4th of July",
+      "Independence Day Special", "New Year's"
+    ],
+    "_": "Any movie/episode where Path, SeriesName, OR Name contains these substrings is rejected from non-holiday channels. Holiday channels ch31/32/33 explicitly REQUIRE these matches."
+  },
+
   "1": {"name": "Primetime", "_": "Hand-built canonical channel — uses project_ersatztv_primetime_canonical memory, not these filters."},
 
   "2": {"name": "Background", "tv_genres_any": ["Comedy","Drama"], "tv_excluded_genres": ["Reality","News","Talk","Game-Show"]},
