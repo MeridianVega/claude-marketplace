@@ -224,7 +224,7 @@ See [`setup/infomercial-filler.md`](../setup/infomercial-filler.md) for the full
 Recommended layout:
 
 ```
-/Volumes/<DRIVE>/_FILLER_LIBRARY/
+<filler-library-root>/             # user-chosen — see setup skill Step 5
   infomercials/{1980s,1990s,2000s}/
   bumpers/{network-idents,custom}/
   test-patterns/

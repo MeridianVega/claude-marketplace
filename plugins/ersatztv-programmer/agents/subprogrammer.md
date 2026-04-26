@@ -67,7 +67,7 @@ If you don't have enough items to fill 24 h with judgment intact (e.g., a smart 
 A single short message to the orchestrator:
 
 ```text
-Channel 42 "Slasher Marathon" — 14 items, 23h47m, /Users/zach/.../channels/42/playout/20260427T000000…json — validated OK.
+Channel 42 "Slasher Marathon" — 14 items, 23h47m, ~/ersatztv-stack/.../channels/42/playout/20260427T000000…json — validated OK.
 ```
 
 Or if you couldn't complete:

@@ -469,12 +469,19 @@ SELECT Path, RuntimeTicks/10000000.0 AS dur_s, DateCreated, Name, Type
 ```
 
 ```sql
--- All wrestling content (anything under the Wrestling library path)
+-- All content from a specific Jellyfin library by ParentId (the library's
+-- TopParentId in BaseItems). Use TopParentId not a Path LIKE — paths are
+-- user-specific; the library's UUID is stable.
 SELECT Path, RuntimeTicks/10000000.0 AS dur_s, SeriesName, Name
   FROM BaseItems
- WHERE Path LIKE '%/_MEDIA_LIBRARY/Wrestling/%'
+ WHERE TopParentId = ?  -- pass the library's BaseItems.Id (look up by Name)
    AND Type='MediaBrowser.Controller.Entities.TV.Episode'
  ORDER BY Path;
+
+-- To find a library's TopParentId by name first:
+SELECT Id FROM BaseItems
+ WHERE Type='MediaBrowser.Controller.Entities.CollectionFolder'
+   AND Name = ?;
 ```
 
 ### Read-only safety

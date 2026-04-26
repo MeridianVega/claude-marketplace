@@ -24,7 +24,7 @@ You read; you don't write. The orchestrator sends a REJECT back to the subprogra
 
 ## Inputs you receive
 
-- The playout file path (e.g. `/Users/zach/.../channels/42/playout/20260427T…json`).
+- The playout file path (e.g. `~/ersatztv-stack/config/ersatztv-next/channels/42/playout/20260427T…json`).
 - The channel's metadata: number, name, bucket, theme, current daypart expectations.
 - Optional: the previous auditor's punch list if this is a re-audit after re-work.
 
@@ -95,7 +95,7 @@ REJECT — Channel 42 "Slasher Marathon"
   Punch list (please fix and re-emit):
    1. items[3].finish (2026-04-27T18:00:00-04:00) ≠ items[4].start (2026-04-27T18:05:00-04:00) — 5-minute gap, no lavfi filler
    2. items[7,8,9] all "Friday the 13th" sequels back-to-back — break up with non-Friday content per the curation rules
-   3. items[11].source.path: /Volumes/Uranus/.../Halloween3.mkv → does not exist (stat: ENOENT)
+   3. items[11].source.path: /media/movies/Halloween3.mkv → does not exist (stat: ENOENT)
    4. midnight–1 AM block: items[14] is a 90-min feature, not infomercial filler — must use /filler/infomercials/* per dead-air rules
 ```
 

@@ -455,11 +455,17 @@ routine:
 
 For "infomercial" filler between programming blocks, see [`infomercial-filler.md`](./infomercial-filler.md) for the yt-dlp acquisition recipe and how to reference filler items in playout JSON.
 
-Recommended location: somewhere on an external drive, e.g. `/Volumes/Pluto/_FILLER_LIBRARY/infomercials/`. Record the path:
+Recommended location: somewhere on an external drive (or wherever the user keeps their media). Ask the user where it should live; common conventions are:
+
+- macOS: `/Volumes/<drive-name>/_FILLER_LIBRARY/infomercials/`
+- Linux: `/srv/media/filler/infomercials/` or `/mnt/<drive>/filler/infomercials/`
+- Docker stack: `${FILLER_LIBRARY}/infomercials/` (mount-point set in `.env`; defaults to a sibling of the media volume)
+
+Record the chosen path verbatim:
 
 ```yaml
 filler:
-  infomercials_dir: /Volumes/Pluto/_FILLER_LIBRARY/infomercials
+  infomercials_dir: <user-supplied path>
   bumpers_dir: ~                      # optional — channel idents, station bumpers
 ```
 
