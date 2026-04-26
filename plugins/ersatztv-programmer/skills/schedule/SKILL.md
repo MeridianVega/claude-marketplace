@@ -189,7 +189,7 @@ When the daily refresh routine fires (default cadence: midnight local, see [`set
 
 Every channel reserves the **12 AM–1 AM local-time block** for filler so the daily refresh routine has a low-stakes window to write new playouts. The slot is also the **last hour viewers see** before fresh programming kicks in — bad filler ruins the channel feel for an hour every night.
 
-Default approach is **theme-matched late-night content from the user's existing library**, NOT acquired infomercials. Acquisition (yt-dlp from Internet Archive — see [`setup/infomercial-filler.md`](../setup/infomercial-filler.md)) is a fallback for users who genuinely want that 1990s late-night-cable nostalgia and have the disk space.
+Default approach is **theme-matched late-night content from the user's existing library**, NOT acquired infomercials. Acquisition (yt-dlp from Internet Archive — see [`setup/infomercial-filler.md`](../setup/infomercial-filler.md)) is a fallback for users who specifically want late-night-cable nostalgia and have the disk space.
 
 The picker the subprogrammer uses, by bucket:
 
@@ -197,17 +197,14 @@ The picker the subprogrammer uses, by bucket:
 
 The core bucket is the densest part of the lineup; the picker varies by channel character:
 
-- **Genre channels** (Action, Drama, Horror, Scifi, etc.) — pick **one documentary episode** whose subject matches the channel theme. NOVA, Cosmos, Anthony Bourdain Parts Unknown, Ken Burns specials, Planet Earth-style. Match by genre/tag overlap.
-  - Example: Channel 19 *Nature* → NOVA episode about wildlife.
-  - Example: Channel 13 *Scifi* → a Cosmos episode (Carl Sagan/Tyson — both fit the channel feel).
-  - Example: Channel 18 *Cooking TV* → Anthony Bourdain Parts Unknown.
-  - Why: Documentaries are calm, ~55 min (perfect 12am–1am fit), and the theme overlap means the channel still feels like itself at 12:30am.
-- **Show-block channels** (Friends, Adult Animation, Saturday Morning, etc.) — continue the channel's signature show into a "sleeper episode." Friends 24/7 just plays the next Friends. Adult Animation plays a King of the Hill late-night episode. Saturday Morning runs a calm late-night cartoon.
-- **Wrestling channels** — Channel 34 (24/7 Wrestling) keeps mixing wrestling continuously, no break. Channel 35 (PPV Time Machine) goes to its standard countdown slate.
+- **Genre channels** — pick **one documentary episode** whose subject overlaps the channel theme via Jellyfin `Genres` / `Tags`. Slow-paced doc series (~50–60 min runtime) fit the slot cleanly and keep the channel feeling on-brand at 12:30 AM. The exact pick depends on what's in the user's library; the daily routine queries that fresh each night so newly-added content gets surfaced.
+- **Show-block channels** — continue the channel's signature show into the next-up episode. The channel was already that show all day; a late-night episode of the same is the most coherent extension.
+- **Wrestling continuous channel** — keep the continuous mix going, no break.
+- **Wrestling PPV time-machine channel** — the channel's standard countdown slate (existing primitive, unchanged).
 
 ### `rotating` channels
 
-Theme-matched documentary or short film. Use the channel's `current_theme` to pick — Director Spotlight runs an extra short film by the chosen director, Decade Deep Dive runs an era-matched documentary, etc.
+Theme-matched short or documentary based on the channel's `current_theme` (the monthly rotation). Director-spotlight rotations get another short by the chosen director; decade rotations get an era-matched doc; etc.
 
 ### `music` channels
 
@@ -231,29 +228,21 @@ When out-of-season, the channel is disabled entirely from the lineup (no playout
 
 ### Implementation note for the subprogrammer
 
-The subprogrammer queries Jellyfin SQLite for documentary episodes matching the channel's theme by (1) `Genres` overlap and (2) `Type='MediaBrowser.Controller.Entities.TV.Episode'` AND `SeriesName` matches a known doc-show list (NOVA, Cosmos, Anthony Bourdain - Parts Unknown, etc. — extend as the user's library grows).
-
-Recommended SQL (schedule skill recipe):
+The subprogrammer discovers candidate documentary content **by querying Jellyfin's `BaseItems` table directly** — no hard-coded show list, no per-user customization that ages out of the plugin. The query shape:
 
 ```sql
 SELECT Path, RuntimeTicks/10000000.0 AS dur_s, SeriesName, Name, Genres
   FROM BaseItems
  WHERE Type='MediaBrowser.Controller.Entities.TV.Episode'
-   AND SeriesName IN ('NOVA','Cosmos','Cosmos: A Spacetime Odyssey',
-                      'Anthony Bourdain - Parts Unknown',
-                      'Anthony Bourdain - No Reservations',
-                      'Planet Earth','Planet Earth II','Blue Planet',
-                      'A Cook''s Tour','Chef''s Table',
-                      'Jim Henson''s The Storyteller',
-                      'Bill Nye - The Science Guy','Horizon')
-   AND RuntimeTicks BETWEEN 30000000000 AND 65000000000  -- 50–108 minutes
+   AND Genres LIKE ?            -- matches the channel's theme tag
+   AND RuntimeTicks BETWEEN 30000000000 AND 65000000000   -- 50–108 minutes
  ORDER BY random()
  LIMIT 1;
 ```
 
-Filter by genre/tag overlap with the channel's theme to pick the most-coherent doc.
+Bind `?` to the channel's theme tag (e.g. `'%Documentary%'` or `'%Nature%'`); pull the `SeriesName` distribution first to spot which doc series the user actually has, then pick from those rather than enumerating series in the SQL itself. Library composition is user-specific; the picker stays library-agnostic by deferring "which series" to runtime.
 
-Fall-through: if the user's library has no documentary that matches the channel theme, fall back to a **lavfi color slate** with the channel's logo as a still image — quiet, branded, harmless. Don't pull random non-thematic content into the slot.
+Fall-through: if no candidate matches, fall back to a **lavfi color slate** with the channel's logo as a still image — quiet, branded, harmless. Don't pull random non-thematic content into the slot.
 
 ## Claude curates, scripts don't (load-bearing)
 
@@ -500,11 +489,13 @@ SELECT Path, RuntimeTicks / 10000000.0 AS dur_s FROM BaseItems WHERE Path = ?;
 ```
 
 ```sql
--- All Friends S1 episodes in order
+-- All episodes of a single series, season N, in episode order.
+-- Bind ?series to the show name and ?season to the season number.
 SELECT Path, RuntimeTicks/10000000.0 AS dur_s, IndexNumber AS ep
   FROM BaseItems
  WHERE Type='MediaBrowser.Controller.Entities.TV.Episode'
-   AND SeriesName='Friends' AND ParentIndexNumber=1
+   AND SeriesName = ?
+   AND ParentIndexNumber = ?
  ORDER BY IndexNumber;
 ```
 

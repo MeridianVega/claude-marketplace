@@ -2,14 +2,25 @@
 """
 build-m3u.py — Generate a sanitized + filtered + reordered channels.m3u.
 
-Walks lineup.json, drops out-of-season holiday channels, sorts the
-remaining channels alphabetically within bucket order (Core → Rotating →
-Live → Experimental → Music last per user preference), assigns tvg-chno
-based on alphabetical position, and writes channels.m3u next to the
-xmltv.xml the nginx sidecar serves.
+Walks lineup.json, applies the user-supplied seasonal-toggle config to
+hide out-of-season channels, sorts the remaining channels alphabetically
+within bucket order (Core → Rotating → Live → Experimental → Music last
+per recommended UX), assigns tvg-chno based on alphabetical position,
+and writes channels.m3u next to the xmltv.xml the nginx sidecar serves.
 
 Run nightly as part of the daily routine — the date drives the seasonal
 toggle, so today's M3U doesn't include channels that aren't in season.
+
+Seasonal config:
+  ${SEASONAL_RULES_FILE} (default: ${STACK_DIR}/tools/seasonal-rules.json)
+  Format: { "Channel Name": [start_month, start_day, end_month, end_day] }
+  Wrap-around supported (e.g. [11,25,1,5] for late-Nov-through-early-Jan).
+  Channels not in the file are always considered in-season.
+
+Group-title overrides (cosmetic — affects how Jellyfin groups channels):
+  ${GROUP_OVERRIDES_FILE} (default: ${STACK_DIR}/tools/group-overrides.json)
+  Format: { "Channel Name": "Display/Group" }
+  Falls back to the channel's bucket name.
 """
 
 from __future__ import annotations
@@ -55,25 +66,59 @@ BUCKET_ORDER = {
     "Music": 4,
 }
 
-# Holiday seasonal toggle. (start_month, start_day, end_month, end_day) inclusive.
-SEASONAL_RULES = {
-    "Halloween":     (10, 1, 10, 31),
-    "Thanksgiving":  (11, 1, 11, 30),
-    "Christmas":     (11, 25, 12, 31),
-}
+SEASONAL_RULES_FILE = Path(
+    os.environ.get(
+        "SEASONAL_RULES_FILE",
+        str(STACK_DIR / "tools/seasonal-rules.json"),
+    )
+)
+GROUP_OVERRIDES_FILE = Path(
+    os.environ.get(
+        "GROUP_OVERRIDES_FILE",
+        str(STACK_DIR / "tools/group-overrides.json"),
+    )
+)
 
 
-def is_in_season(name: str, today: date | None = None) -> bool:
-    if name not in SEASONAL_RULES:
+def load_seasonal_rules() -> dict[str, tuple[int, int, int, int]]:
+    """Read user-supplied seasonal toggles. Channels not listed are always
+    in-season. Format: {"Channel Name": [start_m, start_d, end_m, end_d]}."""
+    if not SEASONAL_RULES_FILE.is_file():
+        return {}
+    try:
+        with open(SEASONAL_RULES_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        return {k: tuple(v) for k, v in raw.items() if isinstance(v, list) and len(v) == 4}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def load_group_overrides() -> dict[str, str]:
+    if not GROUP_OVERRIDES_FILE.is_file():
+        return {}
+    try:
+        with open(GROUP_OVERRIDES_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        return {k: v for k, v in raw.items() if isinstance(v, str)}
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def is_in_season(
+    name: str,
+    rules: dict[str, tuple[int, int, int, int]],
+    today: date | None = None,
+) -> bool:
+    if name not in rules:
         return True
     today = today or date.today()
-    sm, sd, em, ed = SEASONAL_RULES[name]
+    sm, sd, em, ed = rules[name]
     today_mmdd = (today.month, today.day)
     start = (sm, sd)
     end = (em, ed)
     if start <= end:
         return start <= today_mmdd <= end
-    # Wrap-around (Dec→Jan etc.)
+    # Wrap-around (e.g. late-Nov-through-early-Jan)
     return today_mmdd >= start or today_mmdd <= end
 
 
@@ -83,6 +128,9 @@ def main() -> int:
         return 2
 
     today = date.today()
+    seasonal_rules = load_seasonal_rules()
+    group_overrides = load_group_overrides()
+
     with open(LINEUP, "r", encoding="utf-8") as f:
         channels = json.load(f)["channels"]
 
@@ -93,14 +141,10 @@ def main() -> int:
         num = ch["number"]
         name = ch["name"]
         bucket = bucket_for(num)
-        if not is_in_season(name, today):
+        if not is_in_season(name, seasonal_rules, today):
             dropped.append((num, name))
             continue
-        group = bucket
-        if name in ("Halloween", "Thanksgiving", "Christmas"):
-            group = "Core/Holiday"
-        if name in ("24/7 Wrestling", "Time Machine PPV"):
-            group = "Core/Wrestling"
+        group = group_overrides.get(name, bucket)
         rows.append({"num": num, "name": name, "bucket": bucket, "group": group})
 
     # Sort: bucket order, then alphabetical by name (case-insensitive)

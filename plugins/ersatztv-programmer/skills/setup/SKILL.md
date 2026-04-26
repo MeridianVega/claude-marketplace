@@ -549,7 +549,7 @@ routine:
 
 The 12 AM–1 AM block on every channel is reserved for filler so the daily refresh routine has a low-stakes window to regenerate playouts.
 
-**Default (recommended, no acquisition):** the subprogrammer uses theme-matched content from the user's existing library — documentary episodes (NOVA, Cosmos, Bourdain, etc.) on genre channels, signature show continuation on show-block channels, music continuing on music channels, format continuing on experimental channels. See the [schedule skill's "midnight–1 AM slot" section](../schedule/SKILL.md#the-midnight1-am-slot--bucket-aware-late-night-filler) for the per-bucket picker.
+**Default (recommended, no acquisition):** the subprogrammer uses theme-matched content from the user's existing library — slow-paced documentary episodes on genre channels, signature show continuation on show-block channels, music continuing on music channels, format continuing on experimental channels. See the [schedule skill's "midnight–1 AM slot" section](../schedule/SKILL.md#the-midnight1-am-slot--bucket-aware-late-night-filler) for the per-bucket picker.
 
 This approach uses zero disk and adds zero acquisition burden — the user already has documentaries and shows in their library; we just point the picker at them during the dead-air window.
 
