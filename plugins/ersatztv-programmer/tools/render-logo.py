@@ -239,6 +239,25 @@ def render_card(channel_name: str, genre: str, presets: dict) -> Image.Image:
 
 # ---------- cli ----------
 
+def load_config(path: str) -> dict:
+    """Optional user-supplied config that augments classifier + presets.
+
+    Schema:
+        {
+          "exact_matches": { "Channel Name": "preset_key", ... },
+          "presets": {
+            "preset_key": ["Font.ttf", "#FILL", "#STROKE", size],
+            ...
+          }
+        }
+
+    `exact_matches` keys match channel names case-insensitively.
+    `presets` extends/overrides the built-in preset table.
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Render an ErsatzTV channel logo or interstitial card.")
     ap.add_argument("--name", required=True, help="Channel name to render.")
@@ -247,12 +266,26 @@ def main() -> int:
     ap.add_argument("--genre", help="Override classifier; pick a preset key directly (e.g. 'horror', 'type_live').")
     ap.add_argument("--card", action="store_true", help="Render 1920x1080 interstitial card instead of a tight logo.")
     ap.add_argument("--out", required=True, help="Output PNG path.")
+    ap.add_argument("--config", help="Optional JSON config with extra exact_matches + presets to override defaults.")
     ap.add_argument("--print-genre", action="store_true",
                     help="Print the resolved genre key and exit (no render).")
     args = ap.parse_args()
 
     presets = load_presets()
-    genre = args.genre or classify(args.name, args.bucket)
+
+    # Merge user config if provided
+    user_exact = {}
+    if args.config:
+        cfg = load_config(args.config)
+        user_exact = {k.lower(): v for k, v in cfg.get("exact_matches", {}).items()}
+        presets = {**presets, **cfg.get("presets", {})}
+
+    if args.genre:
+        genre = args.genre
+    elif args.name and args.name.lower() in user_exact:
+        genre = user_exact[args.name.lower()]
+    else:
+        genre = classify(args.name, args.bucket)
 
     if args.print_genre:
         print(genre)
