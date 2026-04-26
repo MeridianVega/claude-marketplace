@@ -160,6 +160,21 @@ Determine **PASS** vs **BLOCK**:
 If **PASS** → continue to Phase 6.
 If **BLOCK** → skip Phase 6. Include the full punch list in the summary report. Stop.
 
+### Phase 6a — Restart ETV Next (load fresh state after the rewrites)
+
+ETV's hot-reload doesn't survive substantial mid-session config or playout-filename changes — sessions cache the first playout filename they see, ffmpeg processes accumulate stale `output_ts_offset` values, and `/session/{N}/live.m3u8` ends up returning empty playlists despite valid headers (clients hang on "loading"). After the routine has rewritten 75 channel.json + 75 playout JSON files, restart ETV so it re-scans the playout folder fresh:
+
+```bash
+docker compose -f "${STACK_DIR}/docker-compose.yml" restart ersatztv-next
+sleep 8
+# Sanity probe — first programmed channel should produce segments
+if ! curl -sf -m 5 "http://localhost:18409/session/1/live.m3u8" | grep -q "EXTINF"; then
+  echo "WARNING: ch1 session has no segments post-restart — investigate before refreshing guide"
+fi
+```
+
+Restart kills in-flight ffmpeg processes, so viewers actively watching see ~5–10s of buffering. The 1:07 AM routine fires during the user's filler hour (12am–1am content is generic anyway), so this is invisible to actual viewers.
+
 ### Phase 6 — Refresh Jellyfin guide (only if Phase 5 PASS)
 
 Jellyfin's `/LiveTv/Guide/Refresh` endpoint does NOT exist on current builds (returns 404). Use the **ScheduledTasks** API with the actual task IDs:
