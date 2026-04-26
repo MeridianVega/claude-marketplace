@@ -1,5 +1,5 @@
 ---
-name: schedule
+name: ersatztv-schedule
 description: Procedures for programming an ErsatzTV Next channel — building, validating, and writing playout JSON files from a media library. Loads when the user asks to plan, schedule, build, modify, or rebuild a channel; or when "playout JSON," "marathon," "channel programming," or similar phrases appear.
 ---
 

@@ -1,6 +1,6 @@
 ---
-name: knowledge
-description: Senior-engineer mental model for the ErsatzTV ecosystem. Project history, repository layout, where things live on disk, common debugging paths, upstream entry points, key concepts. Loads when the user asks "where does X live," "why is Y not working," "what's the difference between Legacy and Next," or otherwise needs deep ErsatzTV context the schedule/reference skills don't cover.
+name: ersatztv-knowledge
+description: Senior-engineer mental model for the ErsatzTV ecosystem. Project history, repository layout, where things live on disk, common debugging paths, upstream entry points, key concepts. Loads when the user asks "where does X live," "why is Y not working," "what's the difference between Legacy and Next," or otherwise needs deep ErsatzTV context the ersatztv-schedule/ersatztv-reference skills don't cover.
 disable-model-invocation: false
 user-invocable: false
 ---

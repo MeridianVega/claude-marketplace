@@ -1,6 +1,6 @@
 ---
-name: reference
-description: Pinned schema reference for ErsatzTV Next playout.json, channel.json, and lineup.json. Loads when the schedule skill needs exact field shapes, when a validation error mentions a specific field, or when the user asks "what fields does X support?"
+name: ersatztv-reference
+description: Pinned schema reference for ErsatzTV Next playout.json, channel.json, and lineup.json. Loads when the ersatztv-schedule skill needs exact field shapes, when a validation error mentions a specific field, or when the user asks "what fields does X support?"
 disable-model-invocation: false
 user-invocable: false
 ---

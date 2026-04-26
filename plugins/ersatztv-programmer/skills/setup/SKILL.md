@@ -1,6 +1,6 @@
 ---
-name: setup
-description: First-run wizard for the ersatztv-programmer plugin. Captures the user's media server connection, ErsatzTV Next paths, and channel preferences, then optionally registers a daily refresh routine. User-invocable only — run /setup explicitly when you want to configure or reconfigure.
+name: ersatztv-setup
+description: First-run wizard for the ersatztv-programmer plugin. Captures the user's media server connection, ErsatzTV Next paths, and channel preferences, then optionally registers a daily refresh routine. User-invocable only — run /ersatztv-setup explicitly when you want to configure or reconfigure.
 disable-model-invocation: true
 ---
 
@@ -289,12 +289,12 @@ If the user opted into a routine, give them this exact prompt to paste into the 
 ```text
 Read the ersatztv-programmer config at the path appropriate for this OS
 (see ersatztv-programmer skills/setup/SKILL.md for the full path table).
-For each channel listed in `channels:`, run the schedule skill's procedure
-to (a) regenerate or refresh the playout JSON for the next 24 hours, (b)
-validate it with tools/playout-validate.py, and (c) write the file into
-the channel's playout folder. If `refresh: never` is set on a channel,
-skip it. Report a one-line summary per channel: channel number, item
-count, total run time, status.
+For each channel listed in `channels:`, run the ersatztv-schedule skill's
+procedure to (a) regenerate or refresh the playout JSON for the next 24
+hours, (b) validate it with tools/playout-validate.py, and (c) write the
+file into the channel's playout folder. If `refresh: never` is set on a
+channel, skip it. Report a one-line summary per channel: channel number,
+item count, total run time, status.
 ```
 
 This prompt is self-contained and re-uses the `schedule` skill at run time.

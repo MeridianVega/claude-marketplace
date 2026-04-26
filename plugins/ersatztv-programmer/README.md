@@ -39,17 +39,19 @@ A minimal `examples/docker-compose.yml` is included for a one-shot Next + Jellyf
 
 ## What the plugin contributes
 
+All skills and slash commands are prefixed with `ersatztv-` to keep them recognizable and avoid collisions with built-in Claude Code skills (e.g. the bundled `/schedule`).
+
 | Surface | Name | Purpose |
 | :--- | :--- | :--- |
-| Skill | `schedule` | Loaded when scheduling work begins. Carries the playout JSON schema, file/folder layout, validation procedure, and reload signal. |
-| Skill | `setup` | First-run procedure. Captures your media-server connection, ErsatzTV paths, and channel preferences. Optionally registers the daily routine. |
-| Skill | `reference` | Pinned schema references for `playout.json`, `channel.json`, and `lineup.json`. |
-| Skill | `audit` | Migration helper. Compares an existing ErsatzTV Legacy install against the Next-based setup and reports gaps. |
-| Skill | `knowledge` | Senior-engineer mental model: project history, repo layout, disk paths, debugging routes, upstream entry points. Loads on "where does X live" / "why is Y broken" questions. |
+| Skill | `ersatztv-schedule` | Loaded when scheduling work begins. Carries the playout JSON schema, file/folder layout, validation procedure, and reload signal. |
+| Skill | `ersatztv-setup` | First-run procedure. Captures your media-server connection, ErsatzTV paths, and channel preferences. Optionally registers the daily routine. |
+| Skill | `ersatztv-reference` | Pinned schema references for `playout.json`, `channel.json`, and `lineup.json`. |
+| Skill | `ersatztv-audit` | Migration helper. Compares an existing ErsatzTV Legacy install against the Next-based setup and reports gaps. |
+| Skill | `ersatztv-knowledge` | Senior-engineer mental model: project history, repo layout, disk paths, debugging routes, upstream entry points. Loads on "where does X live" / "why is Y broken" questions. |
 | Agent | `programmer` | Specialized scheduling subagent for multi-channel work. |
-| Command | `/program` | Build or rebuild a channel manually. |
-| Command | `/setup` | Run the first-run wizard. Opt into a routine here if you want one. |
-| Command | `/audit` | Run the migration audit. |
+| Command | `/ersatztv-program` | Build or rebuild a channel manually. |
+| Command | `/ersatztv-setup` | Run the first-run wizard. Opt into a routine here if you want one. |
+| Command | `/ersatztv-audit` | Run the migration audit. |
 | Tool | `playout-validate.py` | JSON-schema validator, runs offline. |
 | Hook | `SessionStart` update check | On session start, polls the marketplace's GitHub repo for newer commits and surfaces a one-line notice if the local plugin is behind. Suggests `/plugin marketplace update`. |
 
@@ -77,9 +79,9 @@ After `/setup`, the daily run rebuilds tomorrow's playout for each registered ch
 
 ## Documentation
 
-- [`HANDOFF.md`](./HANDOFF.md) — onboarding for a Claude Code session new to this stack.
-- [`skills/schedule/SKILL.md`](./skills/schedule/SKILL.md) — schema, file layout, write procedure.
-- [`skills/setup/SKILL.md`](./skills/setup/SKILL.md) — first-run wizard procedure.
+- [`skills/schedule/SKILL.md`](./skills/schedule/SKILL.md) — schema, file layout, write procedure (`ersatztv-schedule`).
+- [`skills/setup/SKILL.md`](./skills/setup/SKILL.md) — first-run wizard procedure (`ersatztv-setup`).
+- [`skills/knowledge/SKILL.md`](./skills/knowledge/SKILL.md) — senior-engineer mental model (`ersatztv-knowledge`).
 - [`examples/playouts/`](./examples/playouts) — example playouts covering common patterns.
 
 ## License

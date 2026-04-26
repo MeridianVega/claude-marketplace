@@ -1,6 +1,6 @@
 ---
-name: audit
-description: Audit an existing ErsatzTV Legacy install against a Next-based setup and report gaps. Loads when the user runs /audit, asks to "migrate from Legacy," asks "what channels do I already have?" or wants a one-time inventory before pivoting to Next. Read-only — never modifies either install.
+name: ersatztv-audit
+description: Audit an existing ErsatzTV Legacy install against a Next-based setup and report gaps. Loads when the user runs /ersatztv-audit, asks to "migrate from Legacy," asks "what channels do I already have?" or wants a one-time inventory before pivoting to Next. Read-only — never modifies either install.
 ---
 
 # Migration audit
