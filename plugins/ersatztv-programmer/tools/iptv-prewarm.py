@@ -64,29 +64,40 @@ def count_segments(body: bytes) -> int:
     return body.count(b".ts")
 
 
-def warm_then_fetch_playlist(channel: int) -> tuple[int, bytes, str]:
-    """Returns the live.m3u8 body once it has at least MIN_SEGMENTS_BEFORE_RETURN
-    segments listed. ETV's `/session/{N}/live.m3u8` auto-starts a cold session
-    on first hit, so we just keep polling until segments materialize."""
-    url = f"{ETV_BASE}/session/{channel}/live.m3u8"
+def kick_master_playlist(channel: int) -> bool:
+    """Hit ETV's master playlist URL `/channel/{N}.m3u8` to wake the session.
+    The master returns a one-line variant playlist pointing at /session/{N}/live.m3u8;
+    the side effect is ETV starting the channel session + spawning ffmpeg.
+    Without this, /session/{N}/live.m3u8 returns 404 for cold channels."""
+    status, _, _ = fetch(f"{ETV_BASE}/channel/{channel}.m3u8", timeout=3.0)
+    return status == 200
 
-    # First poll — this triggers ETV to start the session if cold
-    status, body, ctype = fetch(url, timeout=2.0)
+
+def warm_then_fetch_playlist(channel: int) -> tuple[int, bytes, str]:
+    """Returns /session/{N}/live.m3u8 body once it has at least
+    MIN_SEGMENTS_BEFORE_RETURN segments. Cold-starts the session via the
+    master URL if needed, then polls the variant URL until segments appear."""
+    session_url = f"{ETV_BASE}/session/{channel}/live.m3u8"
+
+    # Fast path: session already warm and segments listed
+    status, body, ctype = fetch(session_url, timeout=2.0)
     if status == 200 and count_segments(body) >= MIN_SEGMENTS_BEFORE_RETURN:
         return status, body, ctype
 
-    # Cold — keep polling. Each poll keeps the session alive + lets ETV
-    # produce more segments. ffmpeg takes ~5-8s for the first usable segment
-    # at 720p libx264 software encode; the second segment lands ~4s after.
+    # Cold start: hit master playlist URL to spawn the session + ffmpeg.
+    # ETV starts producing segments ~5-8s later.
+    kick_master_playlist(channel)
+
+    # Poll the variant URL until segments materialize
     deadline = time.monotonic() + WARMUP_TIMEOUT_S
     while time.monotonic() < deadline:
         time.sleep(WARMUP_POLL_INTERVAL_S)
-        status, body, ctype = fetch(url, timeout=2.0)
+        status, body, ctype = fetch(session_url, timeout=2.0)
         if status == 200 and count_segments(body) >= MIN_SEGMENTS_BEFORE_RETURN:
             return status, body, ctype
 
-    # Timed out — return whatever we have so the client sees something
-    # (better than a 502; Jellyfin will retry which warms the session further)
+    # Timed out — return whatever we have. Jellyfin will retry which keeps
+    # the session warm; the second tune typically succeeds.
     return status, body, ctype
 
 
