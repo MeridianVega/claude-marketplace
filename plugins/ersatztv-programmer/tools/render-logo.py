@@ -34,11 +34,14 @@ Fonts:
   renders, just without the branded typography.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 try:
     from PIL import Image, ImageDraw, ImageFont
@@ -142,7 +145,7 @@ def resolve_style(genre: str, presets: dict) -> tuple:
     return tuple(presets["default"])
 
 
-def resolve_font_path(font_file: str) -> str | None:
+def resolve_font_path(font_file: str) -> Optional[str]:
     for base in FONT_SEARCH_PATHS:
         if not base:
             continue

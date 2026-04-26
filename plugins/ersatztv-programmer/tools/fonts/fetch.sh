@@ -10,74 +10,77 @@
 # their preset entries list Google Fonts approximations. To get the real
 # look, manually drop the original TTFs into this folder with the filenames
 # the presets reference.
+#
+# Compatible with bash 3.2 (macOS default) and bash 4+ — uses parallel
+# arrays instead of `declare -A` so it works on stock macOS without
+# requiring `brew install bash`.
 
-set -euo pipefail
+set -eu
+set -o pipefail
 
 cd "$(dirname "$0")"
 
-# Google Fonts release tarballs the TTF directly off the github CDN.
-# Family-slug -> filename(s). Listed here so adding a new genre = one line.
-declare -A FONTS=(
-    ["abrilfatface"]="AbrilFatface-Regular.ttf"
-    ["archivoblack"]="ArchivoBlack-Regular.ttf"
-    ["bangers"]="Bangers-Regular.ttf"
-    ["bebasneue"]="BebasNeue-Regular.ttf"
-    ["blackopsone"]="BlackOpsOne-Regular.ttf"
-    ["bodoni"]="Bodoni-Regular.ttf"
-    ["bungee"]="Bungee-Regular.ttf"
-    ["cinzeldecorative"]="CinzelDecorative-Bold.ttf"
-    ["creepster"]="Creepster-Regular.ttf"
-    ["dancingscript"]="DancingScript-Regular.ttf"
-    ["fredoka"]="Fredoka-Regular.ttf"
-    ["greatvibes"]="GreatVibes-Regular.ttf"
-    ["lobstertwo"]="LobsterTwo-Bold.ttf"
-    ["luckiestguy"]="LuckiestGuy-Regular.ttf"
-    ["metalmania"]="MetalMania-Regular.ttf"
-    ["mousememoirs"]="MouseMemoirs-Regular.ttf"
-    ["nosifer"]="Nosifer-Regular.ttf"
-    ["orbitron"]="Orbitron-Regular.ttf"
-    ["pacifico"]="Pacifico-Regular.ttf"
-    ["playfairdisplay"]="PlayfairDisplay-Regular.ttf"
-    ["pressstart2p"]="PressStart2P-Regular.ttf"
-    ["quicksand"]="Quicksand-Regular.ttf"
-    ["righteous"]="Righteous-Regular.ttf"
-    ["rubikvinyl"]="RubikVinyl-Regular.ttf"
-    ["rye"]="Rye-Regular.ttf"
-    ["satisfy"]="Satisfy-Regular.ttf"
-    ["specialelite"]="SpecialElite-Regular.ttf"
-    ["teko"]="Teko-Regular.ttf"
-    ["tiltneon"]="TiltNeon-Regular.ttf"
-    ["tomorrow"]="Tomorrow-Bold.ttf"
-    ["vt323"]="VT323-Regular.ttf"
+# Two parallel arrays: SLUGS[i] is the google/fonts/ofl/<slug> directory,
+# FILES[i] is the TTF filename inside it. Adding a new genre = one row in
+# each array. Order doesn't matter; just keep the indices aligned.
+SLUGS=(
+    abrilfatface archivoblack bangers bebasneue blackopsone bodoni bungee
+    cinzeldecorative creepster dancingscript fredoka greatvibes lobstertwo
+    luckiestguy metalmania mousememoirs nosifer orbitron pacifico
+    playfairdisplay pressstart2p quicksand righteous rubikvinyl rye
+    satisfy specialelite teko tiltneon tomorrow vt323
+)
+FILES=(
+    AbrilFatface-Regular.ttf ArchivoBlack-Regular.ttf Bangers-Regular.ttf
+    BebasNeue-Regular.ttf BlackOpsOne-Regular.ttf Bodoni-Regular.ttf
+    Bungee-Regular.ttf CinzelDecorative-Bold.ttf Creepster-Regular.ttf
+    DancingScript-Regular.ttf Fredoka-Regular.ttf GreatVibes-Regular.ttf
+    LobsterTwo-Bold.ttf LuckiestGuy-Regular.ttf MetalMania-Regular.ttf
+    MouseMemoirs-Regular.ttf Nosifer-Regular.ttf Orbitron-Regular.ttf
+    Pacifico-Regular.ttf PlayfairDisplay-Regular.ttf PressStart2P-Regular.ttf
+    Quicksand-Regular.ttf Righteous-Regular.ttf RubikVinyl-Regular.ttf
+    Rye-Regular.ttf Satisfy-Regular.ttf SpecialElite-Regular.ttf
+    Teko-Regular.ttf TiltNeon-Regular.ttf Tomorrow-Bold.ttf VT323-Regular.ttf
 )
 
 # google/fonts repo layout: ofl/<family>/<File>.ttf
 BASE="https://raw.githubusercontent.com/google/fonts/main/ofl"
 
+if [ "${#SLUGS[@]}" -ne "${#FILES[@]}" ]; then
+    echo "ERROR: SLUGS and FILES arrays out of sync (${#SLUGS[@]} vs ${#FILES[@]})" >&2
+    exit 2
+fi
+
 skipped=0
 fetched=0
-failed=()
+failed_count=0
+failed_list=""
 
-for slug in "${!FONTS[@]}"; do
-    file="${FONTS[$slug]}"
-    if [[ -f "$file" ]]; then
+i=0
+while [ "$i" -lt "${#SLUGS[@]}" ]; do
+    slug="${SLUGS[$i]}"
+    file="${FILES[$i]}"
+    if [ -f "$file" ]; then
         skipped=$((skipped + 1))
-        continue
-    fi
-    url="${BASE}/${slug}/${file}"
-    if curl -fsSL -o "$file" "$url"; then
-        fetched=$((fetched + 1))
-        printf "  fetched: %s\n" "$file"
     else
-        failed+=("$file ($url)")
-        rm -f "$file"
+        url="${BASE}/${slug}/${file}"
+        if curl -fsSL -o "$file" "$url"; then
+            fetched=$((fetched + 1))
+            printf "  fetched: %s\n" "$file"
+        else
+            failed_count=$((failed_count + 1))
+            failed_list="${failed_list}
+  - ${file} (${url})"
+            rm -f "$file"
+        fi
     fi
+    i=$((i + 1))
 done
 
 echo
-echo "fonts: $fetched fetched, $skipped already present, ${#failed[@]} failed"
-if [[ ${#failed[@]} -gt 0 ]]; then
-    printf "  - %s\n" "${failed[@]}"
+echo "fonts: $fetched fetched, $skipped already present, $failed_count failed"
+if [ "$failed_count" -gt 0 ]; then
+    printf "%s\n" "$failed_list"
     echo
     echo "Fonts that 404 here usually moved into google/fonts/apache/ or"
     echo "ufl/ instead of ofl/. Search the repo and adjust BASE for that one."
