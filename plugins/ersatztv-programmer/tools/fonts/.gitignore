@@ -1,0 +1,5 @@
+# Fonts are downloaded at install time by fetch.sh — not source.
+# Keep the .gitignore and the script + preset table in version control;
+# the .ttf files are local artifacts.
+*.ttf
+*.otf
