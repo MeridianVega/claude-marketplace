@@ -140,3 +140,60 @@ The bundled `reference` skill in this plugin pins the playout schema at version 
 ## Project history (one paragraph)
 
 ErsatzTV was created by [jasondove](https://github.com/jasondove) as a C#/Blazor IPTV server with smart-collection scheduling. It accumulated a complex scheduling stack (Classic schedules → Block schedules → Sequential YAML → Scripted schedules) and a Lucene-backed search index. In April 2026 the project bifurcated: the original was archived briefly, then **unarchived as "Legacy"** and feature-frozen; a Rust rewrite called **Next** took over the streaming/transcoding role with a much smaller scope. The maintainer's stated direction: Next is the transcoding engine, third-party schedulers (this plugin among them) emit playout JSON for it, Legacy continues to exist as a reference scheduler and will eventually use Next as its transcoding backend. Source: <https://old.reddit.com/r/ErsatzTV/comments/1sngryj/what_is_next_for_ersatztv/> and the unarchive notice on the Legacy repo.
+
+## Channel architecture (the 75/5 model)
+
+This plugin organizes channel inventory into **five buckets** that sum to a recommended **75 channels**. The user can adjust counts; cap is a recommendation, not a hard limit.
+
+| Bucket | Default | What it is |
+| :--- | ---: | :--- |
+| `core` | 35 | Stable, network-style channels — primetime, genre-specific properties, themed weekdays. Defined once, refreshed daily against current library. |
+| `rotating` | 10 | AI picks a fresh theme on the first of each month. Keeps the lineup feeling alive without the user re-defining anything. |
+| `music` | 10 | Music channels — artist focus, decade focus, mood. The only bucket where single-axis (one genre, one decade) channels are encouraged. |
+| `live` | 10 | External HLS/IPTV URLs (iptv-org, news, niche streams). Static `http`-source playouts that just keep streaming. |
+| `experimental` | 10 | AI free-rein within user-set guardrails. Format experiments, oddball blocks, "what if" channels. |
+
+The daily refresh routine (default cadence: midnight local, see [`setup` skill](../setup/SKILL.md)) iterates the buckets in order `live → music → core → rotating → experimental` and emits per-channel playout JSON. Each bucket has a different refresh strategy — see [`schedule` skill](../schedule/SKILL.md).
+
+**Why 75, why these buckets?**
+
+- 75 keeps the daily refresh cost bounded (≈ 75 MCP queries → 75 playout files → one Jellyfin EPG refresh).
+- The 5-bucket split mirrors how real cable lineups are organized: a stable core, a few experimental slots, a music block, and external sources.
+- Past 75 channels, the daily routine starts taking more than a single dead-air slot to finish.
+
+**Fire TV guide note**: Fire TV's Live TV grid widget displays a row of 5 channels at a time and scrolls — total channel count doesn't affect the visible row size. 75 channels is fine for the EPG underneath.
+
+## Migrating from a native install — tandem-run pattern
+
+The recommended migration path keeps the existing native ErsatzTV / Jellyfin running on its original ports while a fresh Docker stack comes up on **+10000 host ports** (so 18409 / 18096 instead of 8409 / 8096). Both run in parallel until the user is confident the new stack is fully programmed and watchable. Then they:
+
+1. Stop & quit the native ErsatzTV.app and Jellyfin.app.
+2. Repoint TV clients (Fire TV, Apple TV, etc.) to the new ports.
+3. Optionally `mv ~/Applications/ErsatzTV.app ~/.Trash/` and equivalent for Jellyfin.
+4. Optionally back up + delete `~/Library/Application Support/ersatztv/` and `~/Library/Application Support/jellyfin/`.
+
+This avoids the all-or-nothing risk of an in-place migration. The `ersatztv-audit` skill captures the native install's channels, schedules, smart collections, and Jellyfin libraries as a read-only snapshot at `${CONFIG_DIR}/last-audit.md` so the new stack can be programmed to match.
+
+The bundled `examples/stack/docker-compose.yml` ships with the +10000 offset already applied to all services. Override per-service in `.env` if any port is taken on the user's host.
+
+## Filler content
+
+Most home channels need filler — the 5–15 second bumpers between programs, the longer infomercial blocks during the midnight–1 AM dead slot, the "be right back" cards during transitions. The plugin doesn't bundle filler content (licensing); it documents acquisition.
+
+See [`setup/infomercial-filler.md`](../setup/infomercial-filler.md) for the full recipe. Summary:
+
+- **Vintage infomercials** → Internet Archive (mostly public domain). Pull with `yt-dlp`.
+- **Network bumpers / station idents** → enthusiast YouTube channels. Use only when the upload is authorized or the original content is clearly out of copyright.
+- **Test patterns / SMPTE bars / be-right-back cards** → trivial to make locally with ffmpeg or `lavfi` synthetic sources.
+
+Recommended layout:
+
+```
+/Volumes/<DRIVE>/_FILLER_LIBRARY/
+  infomercials/{1980s,1990s,2000s}/
+  bumpers/{network-idents,custom}/
+  test-patterns/
+  cards/
+```
+
+Bind-mount the filler directory read-only into the ErsatzTV Next container. The `schedule` skill picks from the pool at programming time so the filler varies day to day.

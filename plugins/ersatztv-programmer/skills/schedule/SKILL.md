@@ -170,3 +170,70 @@ Read one before writing if you're unsure about the exact shape.
 ## When to delegate
 
 If the request involves more than two channels, or the user asks for a "package" of channels (e.g. "build me 5 channels for my horror collection"), delegate to the `programmer` agent. It runs the procedure above per channel without filling the main session's context with library queries.
+
+## Bucket-aware programming (the 75/5 model)
+
+The `ersatztv-setup` wizard organizes channels into **five buckets** that sum to a recommended **75 channels** (configurable). Each bucket gets a different daily-refresh strategy. The setup skill captures the bucket assignments in `config.yaml` under `channels.buckets`; this skill consumes them.
+
+| Bucket | Default count | Daily refresh action |
+| :--- | ---: | :--- |
+| `core` | 35 | Re-emit the next 24 h of programming against the channel's stable theme. Library has changed since yesterday → today's lineup picks up new items. |
+| `rotating` | 10 | Check whether the month rolled over since last refresh. If yes, AI picks a new theme (record it in `config.yaml`). Then emit the next 24 h. |
+| `music` | 10 | Same as core but biased to music libraries. Hour-of-day tags can shift mood (morning easy listening, evening bangers). |
+| `live` | 10 | Re-emit the long window if it's expired. No content discovery — these are just `http` sources pointed at external streams. |
+| `experimental` | 10 | AI picks a fresh format experiment within user-set guardrails. Different from `rotating` because the *format* changes (not just the theme): a marathon today, a daily 8 PM movie tomorrow, a "every show in alphabetical order" stunt the day after. |
+
+When the daily refresh routine fires (default cadence: midnight local, see [`setup` skill](../setup/SKILL.md) Step 4), iterate `config.yaml`'s buckets in this order: `live` (cheapest — no MCP query), `music`, `core`, `rotating`, `experimental`. This puts the most stable buckets first so a partial run still produces useful results if the routine is interrupted.
+
+## Network-style daily programming patterns
+
+When programming `core`, `rotating`, `music`, or `experimental` channels, think like a real network programmer, not like a shuffle algorithm. Real channels have **dayparts** — the time-of-day windows that anchor what kind of content goes when.
+
+### Dayparts (US-style network model)
+
+| Daypart | Hours (local) | Typical content character |
+| :--- | :--- | :--- |
+| Early morning | 5–9 AM | News, kid shows, soft openers |
+| Daytime | 9 AM–4 PM | Soaps, talk, game shows, sitcom reruns |
+| Late afternoon | 4–7 PM | Newsmagazines, family-friendly reruns, talk |
+| Primetime | 7–11 PM | The big shows — drama, blockbuster movies, premieres |
+| Late night | 11 PM–2 AM | Comedy, talk shows, edgier content |
+| Overnight | 2–6 AM | Reruns, movies, infomercials |
+
+Even on a single-genre channel, lean into these rhythms. A horror channel's "primetime" might be a feature-length classic; its "overnight" might be schlocky B-movies; its "early morning" might be PG-13 atmospheric stuff for the few people awake.
+
+### Common channel patterns that work
+
+- **Movie nights** — themed feature films at a fixed primetime slot, with appropriate runners-up. Saturday family movie at 7 PM, Friday horror at 9 PM, Sunday classics at 8 PM.
+- **Show blocks** — 3–4 episodes of a sitcom in a row, then switch to a different show. The 30-minute commitment is real, the 4-hour one isn't.
+- **Marathons** — a single show or director or year, end-to-end. Best for weekends or off-peak. Don't run a marathon during primetime mid-week.
+- **Themed weekdays** — Monday classic westerns, Tuesday spy films, etc. The pattern itself becomes the brand.
+- **Holiday programming** — Christmas in December, horror in October, fireworks-themed action on July 4. Tag-aware. The user's `rotating` bucket is the natural home for this.
+- **Pre/post-show** — short bumpers (5–15 s) between programs, longer "be right back" cards during transitions. See [`setup/infomercial-filler.md`](../setup/infomercial-filler.md).
+
+### What NOT to do
+
+- Don't shuffle a single smart-collection forever. Variety within a daypart is fine; same-show reruns 24/7 is dead air.
+- Don't blast feature films back-to-back without pacing. Two 2-hour movies in a row is fine; eight is fatiguing.
+- Don't over-program weekends. Marathons earn their slots on Saturday; primetime slots on Friday/Saturday are still primetime.
+- Don't forget the dead-air slot. The midnight–1 AM window is where the daily refresh routine writes new playouts. Schedule infomercials or reruns there so it never matters if a refresh runs slightly late.
+
+### Drop the genre-bucket model
+
+Earlier versions of this plugin assumed channels would split TV vs. Movies and bucket by genre (`Movies: Action`, `TV: Action`, etc.). Don't do that anymore. A real channel mixes formats:
+
+- Channel 20 is "Action Network" — afternoon action movies, evening action TV, late-night classic war films, weekend marathons of one show. **All under one channel.**
+- Channel 200 is "Pop Hits" — morning easy-listening playlist, afternoon decade-themed blocks, evening top 40, late-night chillout.
+
+The user's `core` and `rotating` channels should look like real broadcast properties. The `music` bucket is the only one where a single-axis (artist, decade, mood) channel makes sense.
+
+## Refreshing Jellyfin's EPG after a write
+
+Jellyfin doesn't auto-refetch the XMLTV file ErsatzTV Next serves. After writing playout JSON for any channel that's part of the Live TV tuner, hit:
+
+```bash
+curl -X POST "http://localhost:18096/LiveTv/Guide/Refresh" \
+  -H "X-Emby-Token: $JELLYFIN_TOKEN"
+```
+
+This is what the daily refresh routine does at the end of its run. For ad-hoc `/ersatztv-program` calls, only do this if the user is actively watching via Jellyfin's Live TV section.
