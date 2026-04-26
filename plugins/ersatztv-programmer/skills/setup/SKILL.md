@@ -569,6 +569,56 @@ filler:
   bumpers_dir: ~                      # optional — channel idents, station bumpers
 ```
 
+## Step 5.5 — Acquisition (optional, opt-in)
+
+If the user wants the `librarian` agent to find and download new content
+on demand (or to plug gaps in library-thin channels), capture the
+service endpoints and limits now. Skip this step entirely if the user
+isn't running NZBGet/Prowlarr — the rest of the plugin works without it.
+
+Defaults match the bundled docker-compose's port map:
+
+```yaml
+acquisition:
+  enabled: true
+  prowlarr:
+    base_url: http://localhost:19696
+    # api key lives in PROWLARR_API_KEY env var, never in config.yaml
+    blocked_indexers: []
+  nzbget:
+    base_url: http://localhost:16789
+    # credentials live in NZBGET_USER + NZBGET_PASS env vars
+    categories:
+      movie: movies            # must match a category configured in NZBGet
+      tv: tv
+  tmdb:
+    # api token lives in TMDB_API_TOKEN env var
+    region: US                 # for certifications + provider availability
+  media_root: /Volumes/Uranus  # absolute path on the host that NZBGet
+                               # post-processing imports into; the disk
+                               # floor is computed against this path's
+                               # filesystem.
+  disk_floor_gb: 200           # never let free space drop below this; the
+                               # transcoding cache needs headroom.
+  short_channel_budget_gb: 30  # cap per channel-thin librarian run when
+                               # the programmer orchestrator triggers it.
+  quality_target: 1080p        # 1080p, 720p, any
+  prefer_codec: hevc           # hevc, h264, any
+  prefer_source: web-dl        # web-dl, bluray, any
+  size_ceilings:
+    movie_1080p: 8.0           # GB
+    tv_episode_1080p: 2.5      # GB
+```
+
+Once written, prompt the user to run `/librarian` to do the first-run
+psychology session. The session is interactive (asks the user
+questions) and writes `taste.md` next to `config.yaml`. Until that
+file exists, the librarian refuses to act.
+
+If the user picks `acquisition.enabled: false`, the `librarian` agent
+and `/librarian` slash command remain installed but inert — calling them
+returns a "set acquisition.enabled: true in config.yaml first" message.
+
 ## Step 6 — Verify
 
 End-to-end smoke test of one channel before marking setup complete:

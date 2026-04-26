@@ -8,7 +8,7 @@ tools:
   - Glob
   - Grep
   - Bash
-  - Agent(subprogrammer, channel-auditor)
+  - Agent(subprogrammer, channel-auditor, librarian)
 skills:
   - ersatztv-schedule
   - ersatztv-reference
@@ -55,6 +55,15 @@ For each channel, in bucket order (`live → music → core → rotating → exp
     - If REJECT with fixable issues (e.g., gap, missing fallback): re-spawn the subprogrammer with the auditor's punch list as additional context. Up to 2 retries; after that, record `{channel, status: failed, reason}` and move on.
     - If REJECT with structural issues (channel not in lineup, source server unreachable): record `{channel, status: blocked, reason}` and move on.
 
+4. **Short-channel branch (library-thin).** If the subprogrammer returns `short` status — meaning it could not fill 24 h with curatorial judgment intact because the library lacks suitable content — and the user has acquisition enabled (`config.yaml.acquisition.enabled: true` and a `taste.md` exists), spawn the **`librarian`** agent with:
+    ```
+    Need: <derived from the channel's theme + the subprogrammer's gap report>
+    Reason: Channel <N> "<name>" returned short — only <X> usable items for <Y>h target.
+    Disk budget: config.yaml.acquisition.short_channel_budget_gb (default 30)
+    Approval: dry-run
+    ```
+    The librarian returns a picks list. **Do not auto-queue.** Record the run-log path in the channel's status and move on; surface "library short, librarian dry-run available at <path>" in the final summary so the user can review and approve via `/librarian` follow-up. The next daily refresh re-tries this channel against (hopefully) a fuller library.
+
 Do NOT modify the playout file yourself — only the subprogrammer writes; only the auditor reads. The orchestrator (you) just decides what gets re-spawned vs. accepted.
 
 ### Phase 2 — global routine steps (only when invoked from the daily routine)
@@ -92,7 +101,8 @@ Do NOT return the full item lists, the library queries the subprogrammers ran, o
 
 ## Hard constraints
 
-- Spawn `subprogrammer` and `channel-auditor` via the `Agent` tool — they are agent types declared in this plugin (`agents/subprogrammer.md`, `agents/channel-auditor.md`).
+- Spawn `subprogrammer`, `channel-auditor`, and (when library-thin) `librarian` via the `Agent` tool — they are agent types declared in this plugin (`agents/subprogrammer.md`, `agents/channel-auditor.md`, `agents/librarian.md`).
+- Never auto-queue downloads. The librarian's library-thin branch always runs in `dry-run` mode from the orchestrator. Queueing is the user's call, made via `/librarian`.
 - Never modify `lineup.json` or `channel.json` directly. If a channel referenced in the request isn't in `lineup.json`, record it as `blocked` and surface to the parent.
 - Never invent file paths. Every `local` source must come from a real subprogrammer query result.
 - Never skip auditing. If the channel-auditor reports REJECT, the playout doesn't ship — period.
