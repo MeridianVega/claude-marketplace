@@ -489,18 +489,16 @@ def _render_card_png(
     return True
 
 
-def _render(a: RenderArgs, text_chain: str, logo_y: int = 140, logo_w: int = 280) -> bool:
-    """Legacy fallback (ffmpeg drawtext) — only used if PIL composition fails. Kept for safety."""
-    raise NotImplementedError("Use _render_with_layers instead")
-
-
 def _render_with_layers(
     a: RenderArgs,
     text_layers: list,
     logo_y: int = 140,
     logo_w: int = 280,
 ) -> bool:
-    """Render card via PIL → static PNG → MP4 with audio. ~10-30x faster than the ffmpeg drawtext approach."""
+    """Render card via PIL → static PNG → MP4 with audio. PNG persists alongside
+    the MP4 so the deco system can use the same image as a long-form filler video
+    via lavfi `movie=…,loop`. The MP4 is the spliced 15s pre-program bumper;
+    the PNG is the static card displayed during the rest of the filler period."""
     a.out_path.parent.mkdir(parents=True, exist_ok=True)
     png = a.out_path.with_suffix(".png")
     if not _render_card_png(
@@ -524,10 +522,8 @@ def _render_with_layers(
         str(a.out_path),
     ]
     ok = _run_ffmpeg(mp4_cmd, f"{a.out_path.name}")
-    try:
-        png.unlink()
-    except OSError:
-        pass
+    # Keep PNG (no unlink) — deco system uses it as a static-image video source
+    # for the full filler period via `movie=…,loop`. Both artifacts live side-by-side.
     return ok
 
 

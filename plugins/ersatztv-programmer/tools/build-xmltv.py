@@ -291,16 +291,19 @@ def emit_programme(
     xmltv_ns_ep = None
 
     if src_type == "_filler_block":
-        # Merged filler run — emit a single short programme so the guide stays readable
-        title = "Music"
+        # Merged filler run — present as a single "Station Break" deco entry,
+        # NOT as music programming. Reads in the guide as a unified break
+        # between shows, with a single duration line.
+        title = "Station Break"
         sub_title = ""
         cats = ["Music"]
-        # Compute duration for sub-title hint
         dur_s = (parse_iso(item["finish"]) - parse_iso(item["start"])).total_seconds()
-        if dur_s >= 3600:
-            sub_title = f"{int(dur_s // 60)} min block"
-        else:
+        if dur_s >= 600:
             sub_title = f"{int(dur_s // 60)} min"
+        elif dur_s >= 60:
+            sub_title = f"{int(dur_s // 60)} min"
+        else:
+            sub_title = f"{int(dur_s)}s"
 
     elif src_type == "local":
         path = src.get("path", "")

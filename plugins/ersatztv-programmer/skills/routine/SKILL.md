@@ -44,6 +44,32 @@ These are repeated across the plugin's other docs (`schedule` skill, `programmer
 3. **Claude curates, scripts don't.** Playout content selection is done with Claude's judgment via the `subprogrammer` and `channel-auditor` agents. Mechanical work (M3U / XMLTV / bumper rendering / validation) is scripted; curation never is.
 4. **Final-auditor ALWAYS runs.** No path skips it, even if every per-channel build APPROVED on the first try. It catches cross-cutting issues the per-channel auditor cannot.
 5. **No Jellyfin refresh on BLOCK.** If the final-auditor returns BLOCK, do not call `/LiveTv/Guide/Refresh`. Surface the punch list and stop.
+6. **Restart ETV after substantial rewrites.** ETV's hot-reload doesn't survive bulk channel.json or playout filename changes — sessions cache stale state and `/session/{N}/live.m3u8` returns empty playlists. Always `docker compose restart ersatztv-next` at end-of-routine before the Jellyfin refresh.
+7. **Stream-probe every channel.** The JSON-level `final-auditor` does not catch cases where ETV silently drops a channel (subtle config issue, missing media reference). Run `tools/probe-streams.py` after restart to verify each channel actually produces HLS segments end-to-end.
+
+## Encoding profile (Docker on macOS — software encode)
+
+Docker on macOS cannot reach VideoToolbox; everything is software-encoded via libx264. The verified-working profile (matched against real-world streaming load) is:
+
+| Setting | Value | Why |
+| :--- | :--- | :--- |
+| Video format | h264 | libx265 software at 1080p couldn't keep up with real-time on a 12-core M-series under multi-stream load |
+| Resolution | 1280x720 | Roughly 2× faster than 1080p; visually fine on TVs at viewing distance |
+| Video bitrate | 2500 kbps | Comfortably real-time on Apple Silicon; ~15-20% of one core per stream |
+| Audio format | aac | Universal client direct-play. AC3 triggers Jellyfin re-transcode on iOS/Apple TV/most browsers — that's the lag source. |
+| Audio bitrate | 192 kbps | |
+| `normalize_loudness` | false | The loudnorm filter costs ~10-20% CPU per stream. Drops the cost without much perceptual loss for most viewers. |
+| `accel` | null | Docker can't see VideoToolbox. Setting `videotoolbox` would crash ETV. |
+
+If a future migration moves ETV Next to a native macOS install, switch `accel: videotoolbox` and `format: hevc` for hardware-accelerated HEVC at the Legacy-quality level (8 Mbps 1080p).
+
+## Filler / deco model
+
+Between programs on programmed channels, viewers see **brand-themed music filler** with a **channel deco card on screen** for the entire break. Mechanism:
+
+- Each filler item: `source` = music audio file (channel-genre-matched), `tracks.video.source` = lavfi `movie=/config/logos/{N}.png,loop=loop=-1:size=1,format=yuv420p,scale=1280:720,pad=...` so the channel's logo is a static image video for the full filler duration.
+- The XMLTV merge step collapses consecutive filler items into a single `Station Break` programme entry per gap, so the EPG stays readable.
+- The 15s pre-program bumper (rendered as MP4 with personality voice line) is spliced into the trailing portion of the filler — viewers see the deco logo for the bulk, then a personality card hits 15s before the next program.
 
 ## Procedure
 
