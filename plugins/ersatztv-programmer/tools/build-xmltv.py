@@ -18,6 +18,7 @@ via the nginx-xmltv sidecar at http://localhost:18408/xmltv.xml.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sqlite3
@@ -37,6 +38,9 @@ CHANNELS_DIR = STACK_DIR / "config/ersatztv-next/channels"
 LINEUP = STACK_DIR / "config/ersatztv-next/lineup.json"
 M3U = STACK_DIR / "config/ersatztv-next/channels.m3u"
 OUT = STACK_DIR / "config/ersatztv-next/xmltv.xml"
+DEFAULT_DIRECTOR_PICKS = STACK_DIR / "state/director-picks.json"
+EDITOR_PICK_PREFIX = "[Editor's Pick] "
+PRIMETIME_HOURS = {19, 20, 21, 22, 23}
 
 # Jellyfin BaseItems.Type → XMLTV category. Pipe-separated values map to
 # Jellyfin Live TV's category-filter fields:
@@ -216,13 +220,67 @@ def episode_num_onscreen(season: str, idx: int) -> str | None:
         return None
 
 
+def is_filler_item(item: dict, meta_by_path: dict) -> bool:
+    """Return True if an item is filler (lavfi, music audio, or bumper) and should be merged."""
+    src = item.get("source") or {}
+    t = src.get("source_type", "")
+    if t == "lavfi":
+        return True
+    if t == "local":
+        path = (src.get("path") or "").lower()
+        # Audio file extensions
+        if path.endswith((".mp3", ".flac", ".m4a", ".aac", ".wav", ".ogg", ".opus", ".alac")):
+            return True
+        # Bumper MP4s live under /bumpers/
+        if "/bumpers/" in path:
+            return True
+        # Or check Jellyfin metadata type
+        meta = meta_by_path.get(src.get("path", ""))
+        if meta and meta.get("type", "").endswith(".Audio.Audio"):
+            return True
+    return False
+
+
+def merge_filler_runs(items: list, meta_by_path: dict) -> list:
+    """Walk items, collapsing consecutive filler items into single 'filler block' programmes.
+    Reduces guide bloat from 100s of music tracks per channel down to a handful of programme entries."""
+    out = []
+    i = 0
+    while i < len(items):
+        if is_filler_item(items[i], meta_by_path):
+            # Find the run of consecutive filler items
+            j = i
+            while j < len(items) and is_filler_item(items[j], meta_by_path):
+                j += 1
+            # Merge into a single virtual item
+            merged = {
+                "id": items[i].get("id", "filler") + "-merged",
+                "start": items[i]["start"],
+                "finish": items[j-1]["finish"],
+                "source": {"source_type": "_filler_block", "count": j - i},
+            }
+            out.append(merged)
+            i = j
+        else:
+            out.append(items[i])
+            i += 1
+    return out
+
+
 def emit_programme(
-    fh, channel_id: str, item: dict, meta_by_path: dict[str, dict], slate_seq: int
+    fh,
+    channel_id: str,
+    item: dict,
+    meta_by_path: dict[str, dict],
+    slate_seq: int,
+    is_editor_pick: bool = False,
 ) -> int:
     src = item.get("source") or {}
     start = xmltv_dt(item["start"])
     stop = xmltv_dt(item["finish"])
     src_type = src.get("source_type", "")
+    item_start_dt = parse_iso(item["start"])
+    apply_pick = is_editor_pick and item_start_dt.hour in PRIMETIME_HOURS
 
     title = ""
     sub_title = ""
@@ -232,7 +290,19 @@ def emit_programme(
     onscreen = None
     xmltv_ns_ep = None
 
-    if src_type == "local":
+    if src_type == "_filler_block":
+        # Merged filler run — emit a single short programme so the guide stays readable
+        title = "Music"
+        sub_title = ""
+        cats = ["Music"]
+        # Compute duration for sub-title hint
+        dur_s = (parse_iso(item["finish"]) - parse_iso(item["start"])).total_seconds()
+        if dur_s >= 3600:
+            sub_title = f"{int(dur_s // 60)} min block"
+        else:
+            sub_title = f"{int(dur_s // 60)} min"
+
+    elif src_type == "local":
         path = src.get("path", "")
         meta = meta_by_path.get(path)
         if meta:
@@ -281,6 +351,9 @@ def emit_programme(
     else:
         title = "(unknown)"
 
+    if apply_pick and title:
+        title = EDITOR_PICK_PREFIX + title
+
     fh.write(f'  <programme start="{start}" stop="{stop}" channel="{xml_escape(channel_id)}">\n')
     fh.write(f'    <title lang="en">{xml_escape(title)}</title>\n')
     if sub_title:
@@ -297,13 +370,37 @@ def emit_programme(
     return slate_seq
 
 
+def load_director_picks(path: Path) -> set[str]:
+    """Returns the set of channel numbers (lineup_num) flagged as Editor's Pick today.
+    Empty set if no picks file exists."""
+    if not path.is_file():
+        return set()
+    try:
+        d = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return set()
+    return set(d.get("top_picks", []))
+
+
 def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--director-picks",
+        default=str(DEFAULT_DIRECTOR_PICKS),
+        help="Path to director-picks.json (default: STACK_DIR/state/director-picks.json).",
+    )
+    args = ap.parse_args()
+
     if not JF_DB.is_file():
         print(f"Jellyfin DB not found at {JF_DB}", file=sys.stderr)
         return 2
     if not LINEUP.is_file():
         print(f"lineup.json not found at {LINEUP}", file=sys.stderr)
         return 2
+
+    director_picks = load_director_picks(Path(args.director_picks))
+    if director_picks:
+        print(f"Director picks loaded: {sorted(director_picks)} — primetime titles will be prefixed '[Editor's Pick] '")
 
     print(f"Indexing Jellyfin items from {JF_DB} …")
     conn = sqlite3.connect(f"file:{JF_DB}?immutable=1", uri=True)
@@ -362,8 +459,13 @@ def main() -> int:
                 skipped += 1
                 continue
             slate_seq = 0
-            for item in playout.get("items", []):
-                slate_seq = emit_programme(fh, cid, item, meta_by_path, slate_seq)
+            is_pick = lineup_num in director_picks
+            raw_items = playout.get("items", [])
+            merged_items = merge_filler_runs(raw_items, meta_by_path)
+            for item in merged_items:
+                slate_seq = emit_programme(
+                    fh, cid, item, meta_by_path, slate_seq, is_editor_pick=is_pick
+                )
                 total_programmes += 1
 
         fh.write("</tv>\n")
