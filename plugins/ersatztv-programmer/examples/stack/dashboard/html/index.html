@@ -124,9 +124,17 @@
         id: 'ersatztv',
         name: 'ErsatzTV Next',
         url:  `http://${location.hostname}:${p('ersatztv', '18409')}`,
-        desc: 'Live-TV scheduler + transcoder. Channels live here.',
+        desc: 'Live-TV scheduler + transcoder. M3U: /channels.m3u',
         docs: 'https://github.com/ErsatzTV/next/blob/main/README.md',
         health: `http://${location.hostname}:${p('ersatztv', '18409')}/channels.m3u`,
+      },
+      {
+        id: 'xmltv',
+        name: 'XMLTV (EPG)',
+        url:  `http://${location.hostname}:${p('xmltv', '18408')}/xmltv.xml`,
+        desc: 'EPG endpoint for Jellyfin Live TV. ETV Next does not emit XMLTV; the daily routine writes it here.',
+        docs: 'https://wiki.xmltv.org/index.php/XMLTVFormat',
+        health: `http://${location.hostname}:${p('xmltv', '18408')}/xmltv.xml`,
       },
       {
         id: 'jellyfin',

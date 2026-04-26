@@ -34,7 +34,11 @@ x-puid-pgid: &puid-pgid
 
 services:
   ersatztv-next:
-    image: ghcr.io/ersatztv/next:latest
+    # ETV Next is pre-1.0 — there is no `:latest` tag yet. Use `:develop`
+    # (the current rolling tag) until upstream cuts a stable release;
+    # bump this comment + tag when they do. Per-commit SHA tags exist
+    # if you want a stable pin.
+    image: ghcr.io/ersatztv/next:develop
     container_name: ersatztv-next
     restart: unless-stopped
     pull_policy: always
@@ -70,6 +74,33 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+
+  # ---------------------------------------------------------------
+  # XMLTV sidecar — ETV Next intentionally does NOT generate XMLTV
+  # (per upstream README: "library/metadata/scheduling/playout creation
+  # are not in scope"). Without this, Jellyfin's Live TV guide is
+  # empty. The plugin's daily refresh routine writes
+  # config/ersatztv-next/xmltv.xml; this nginx serves it at
+  # http://localhost:18408/xmltv.xml so Jellyfin can subscribe to it
+  # as an XMLTV listings provider.
+  # ---------------------------------------------------------------
+  xmltv:
+    image: nginx:1.27-alpine
+    container_name: xmltv
+    restart: unless-stopped
+    pull_policy: always
+    ports:
+      - "${XMLTV_PORT:-18408}:80"
+    volumes:
+      # Same volume ETV Next reads from. Read-only for the sidecar —
+      # only the daily routine writes here.
+      - ./config/ersatztv-next:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/xmltv.xml"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   jellyfin:
     image: lscr.io/linuxserver/jellyfin:latest
@@ -238,6 +269,7 @@ services:
       - ./dashboard/html:/usr/share/nginx/html
     environment:
       ERSATZTV_PORT: "${ERSATZTV_PORT:-18409}"
+      XMLTV_PORT: "${XMLTV_PORT:-18408}"
       JELLYFIN_PORT: "${JELLYFIN_PORT:-18096}"
       JELLYSEERR_PORT: "${JELLYSEERR_PORT:-15055}"
       PROWLARR_PORT: "${PROWLARR_PORT:-19696}"

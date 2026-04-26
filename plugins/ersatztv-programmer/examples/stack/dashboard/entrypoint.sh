@@ -17,6 +17,7 @@ cat > "$OUT" <<EOF
 window.seadog_env = Object.freeze({
   ports: Object.freeze({
     ersatztv:   "${ERSATZTV_PORT:-18409}",
+    xmltv:      "${XMLTV_PORT:-18408}",
     jellyfin:   "${JELLYFIN_PORT:-18096}",
     jellyseerr: "${JELLYSEERR_PORT:-15055}",
     prowlarr:   "${PROWLARR_PORT:-19696}",

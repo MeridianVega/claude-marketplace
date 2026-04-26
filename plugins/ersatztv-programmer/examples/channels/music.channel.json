@@ -1,0 +1,39 @@
+{
+  "_comment": "music bucket — audio-first. Higher audio bitrate (256 kbps), stereo, looser loudness target so the channel feels musical rather than broadcast-flat. Video downsized to 720p since interstitial cards are the only visual; saves transcode budget. Pairs with render-logo.py --card output as the playout's video track during music-only items.",
+  "playout": {
+    "folder": "./channels/{N}/playout",
+    "virtual_start": null
+  },
+  "ffmpeg": {
+    "ffmpeg_path": "",
+    "ffprobe_path": "",
+    "disabled_filters": []
+  },
+  "normalization": {
+    "audio": {
+      "format": "aac",
+      "bitrate_kbps": 256,
+      "buffer_kbps": 512,
+      "channels": 2,
+      "sample_rate_hz": 48000,
+      "normalize_loudness": true,
+      "loudness": {
+        "integrated_target": -14,
+        "range_target": 14,
+        "true_peak": -1.0
+      }
+    },
+    "video": {
+      "format": "hevc",
+      "bit_depth": 8,
+      "width": 1280,
+      "height": 720,
+      "bitrate_kbps": 1200,
+      "buffer_kbps": 2400,
+      "accel": "",
+      "tonemap_algorithm": "linear",
+      "vaapi_device": "/dev/dri/renderD128",
+      "vaapi_driver": "iHD"
+    }
+  }
+}

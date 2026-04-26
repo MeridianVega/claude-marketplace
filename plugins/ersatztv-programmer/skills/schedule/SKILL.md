@@ -185,6 +185,40 @@ The `ersatztv-setup` wizard organizes channels into **five buckets** that sum to
 
 When the daily refresh routine fires (default cadence: midnight local, see [`setup` skill](../setup/SKILL.md) Step 4), iterate `config.yaml`'s buckets in this order: `live` (cheapest — no MCP query), `music`, `core`, `rotating`, `experimental`. This puts the most stable buckets first so a partial run still produces useful results if the routine is interrupted.
 
+## Claude curates, scripts don't (load-bearing)
+
+This is the single most important rule in this skill. The user has stated
+it as non-negotiable.
+
+A real network programmer thinks about *which* item goes *where in the
+day* — pacing, format mix, daypart character, what comes before vs.
+after, what last week looked like. Bring that judgment, every time.
+
+The temptation to grab a smart collection, `random.shuffle()` it, and
+call the channel done is real and wrong. So is "alphabetical by title,"
+"chronological by release," "longest first." Those are scripts. They
+produce 24 hours of identical character — no rhythm, no peak, no
+distinction between Tuesday afternoon and Saturday primetime.
+
+Practical rules that follow from this:
+
+- Build the items array item-by-item with intent. For each slot, ask:
+  *given the daypart, the day of week, what aired in the previous slot,
+  and what kind of channel this is — what should go here?*
+- If a query returns 200 candidates, you pick which 14 land today and
+  in what order. Don't pad with whatever's left.
+- If you don't have enough items to fill 24 h with judgment intact (a
+  smart collection of 6 obscure films on a one-show channel), surface
+  that to the parent (`short` status from the subprogrammer agent).
+  Don't pad with garbage and call it done — the user would rather see a
+  short report than 24 h of noise.
+- The only acceptable "shuffle" is `shuffle-in-order` for music
+  channels, where the playback engine itself rotates a curated list
+  you've already shaped by hour-of-day mood.
+
+This rule applies to setup, daily refresh, ad-hoc `/ersatztv-program`,
+and the agent-team subprogrammers. None of them get to skip it.
+
 ## Network-style daily programming patterns
 
 When programming `core`, `rotating`, `music`, or `experimental` channels, think like a real network programmer, not like a shuffle algorithm. Real channels have **dayparts** — the time-of-day windows that anchor what kind of content goes when.
@@ -217,6 +251,120 @@ Even on a single-genre channel, lean into these rhythms. A horror channel's "pri
 - Don't blast feature films back-to-back without pacing. Two 2-hour movies in a row is fine; eight is fatiguing.
 - Don't over-program weekends. Marathons earn their slots on Saturday; primetime slots on Friday/Saturday are still primetime.
 - Don't forget the dead-air slot. The midnight–1 AM window is where the daily refresh routine writes new playouts. Schedule infomercials or reruns there so it never matters if a refresh runs slightly late.
+
+### Four scheduling primitives beyond the daily refresh
+
+The default refresh strategy ("re-emit the next 24 h") covers most
+channels, but a real lineup also wants channels that drift on longer
+arcs. Use these primitives in `config.yaml` under each channel; the
+daily refresh routine consumes them.
+
+#### 1. `year-offset` — "On This Day" / time-shifted history
+
+Shift the playout window's wall-clock target by a fixed year delta so
+the channel airs what was on N years ago today. Reads air-date metadata
+from the media server.
+
+```yaml
+- number: "10"
+  name: "On This Day"
+  bucket: core
+  primitive: year-offset
+  year_offset: -25         # 25 years ago, today
+  source_collection: "TV: Sitcoms"
+```
+
+At refresh time: query the collection, filter by `air_date.month/day ==
+today.month/day` and `air_date.year == today.year + year_offset`, build
+24 h around what's left. If nothing aired exactly N years ago today,
+widen to ±3 days and surface that softly.
+
+#### 2. `weekly-progression` — fixed-slot show advancement
+
+A specific show plays at a specific weekday + time, advancing one
+episode per occurrence. The classic "Tuesday 9 PM is *The Leftovers*."
+State persists across runs in `state.json` next to the playout folder.
+
+```yaml
+- number: "11"
+  name: "Tuesday Drama"
+  bucket: core
+  primitive: weekly-progression
+  slots:
+    - weekday: 2          # 0=Mon..6=Sun
+      time: "21:00"
+      duration_min: 60
+      show: "The Leftovers"
+      mode: episode-advance      # next-in-queue
+    - weekday: 5          # also Friday
+      time: "20:00"
+      duration_min: 90
+      show: "True Detective"
+      mode: episode-advance
+```
+
+At refresh time: read `state.json`, for any slot whose target weekday +
+time falls inside today's window, place that show's next-in-queue
+episode and advance the cursor. Other hours of the day fall back to the
+channel's regular daypart programming.
+
+#### 3. `seasonal-toggle` — date-window content gating
+
+The channel runs entirely different content during specific date
+windows. Halloween in October, Christmas in December, fireworks-action
+on July 4. Use for `rotating` channels that have predictable seasonal
+peaks.
+
+```yaml
+- number: "100"
+  name: "The Mood Channel"
+  bucket: rotating
+  primitive: seasonal-toggle
+  seasons:
+    - name: "Halloween"
+      start: "10-01"        # MM-DD
+      end:   "10-31"
+      theme: "horror, slashers, atmospheric"
+    - name: "Christmas"
+      start: "11-25"
+      end:   "12-31"
+      theme: "holiday classics, romantic comedies, cozy"
+    - name: "Summer"
+      start: "06-21"
+      end:   "08-31"
+      theme: "blockbusters, beach movies, action"
+  default_theme: "general crowd-pleasers"
+```
+
+At refresh time: pick the season matching today's date (windows can
+overlap — the first match wins); program against that theme. When no
+window matches, fall back to `default_theme`. Recorded:
+`current_season: Halloween` so daily reports show what's active.
+
+#### 4. `weekly-reinvention` — experimental format rotation
+
+Each week the channel reinvents itself: a marathon Mondays, daily 8 PM
+movie Tuesdays, alphabetical-by-title stunt the next week. Lives in the
+`experimental` bucket; the AI picks the format under the channel's
+`freeform_guardrails`.
+
+```yaml
+- number: "900"
+  name: "Format Lab"
+  bucket: experimental
+  primitive: weekly-reinvention
+  reinvent_on: monday          # rollover trigger
+  freeform_guardrails: |
+    Family-safe by default. Each week pick a format that hasn't run in
+    the last 8 weeks. Surprise me — but every week must still result in
+    24 h of continuous content with daypart-aware pacing.
+  history_window_weeks: 8
+```
+
+At refresh time: if today is the reinvent day and `last_reinvented_week`
+is older than this week, pick a new format (record it in
+`current_format`, append previous to `format_history`). Otherwise carry
+on with the existing format.
 
 ### Drop the genre-bucket model
 

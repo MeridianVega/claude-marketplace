@@ -1,0 +1,39 @@
+{
+  "_comment": "live bucket — pass-through of an external HLS/MPEG-TS source. Disable loudness normalization (live streams already mix their own) and pick H.264 8-bit so cheap clients can decode without HEVC support. Bitrate left low; if the upstream is higher, transcoding will downsize. Playout window is long (7d+) — same single http item re-anchored daily, not 24h re-emits.",
+  "playout": {
+    "folder": "./channels/{N}/playout",
+    "virtual_start": null
+  },
+  "ffmpeg": {
+    "ffmpeg_path": "",
+    "ffprobe_path": "",
+    "disabled_filters": []
+  },
+  "normalization": {
+    "audio": {
+      "format": "aac",
+      "bitrate_kbps": 128,
+      "buffer_kbps": 256,
+      "channels": 2,
+      "sample_rate_hz": 48000,
+      "normalize_loudness": false,
+      "loudness": {
+        "integrated_target": -16,
+        "range_target": 11,
+        "true_peak": -1.5
+      }
+    },
+    "video": {
+      "format": "h264",
+      "bit_depth": 8,
+      "width": 1280,
+      "height": 720,
+      "bitrate_kbps": 2500,
+      "buffer_kbps": 5000,
+      "accel": "",
+      "tonemap_algorithm": "linear",
+      "vaapi_device": "/dev/dri/renderD128",
+      "vaapi_driver": "iHD"
+    }
+  }
+}
