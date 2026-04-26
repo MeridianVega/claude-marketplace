@@ -1,0 +1,326 @@
+#!/usr/bin/env python3
+"""
+build-xmltv.py — Walk every channel's playout JSON, emit a single xmltv.xml.
+
+This is a mechanical translation utility, not a playout generator. Channel
+content was curated by Claude (Primetime by main session, the rest by the
+programmer agent team). This tool just turns those JSON playouts into
+XMLTV that Jellyfin's Live TV guide reads to populate per-program titles +
+categories.
+
+Pulls metadata (title, type, genres) from Jellyfin's SQLite DB to enrich
+each <programme> entry with a <category> tag so Jellyfin's
+movie/news/sports/kids filters work.
+
+Output: ${STACK_DIR}/config/ersatztv-next/xmltv.xml — served to Jellyfin
+via the nginx-xmltv sidecar at http://localhost:18408/xmltv.xml.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+import sys
+from datetime import datetime
+from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape
+
+STACK_DIR = Path(os.environ.get("STACK_DIR", str(Path.home() / "ersatztv-stack")))
+JF_DB = Path(
+    os.environ.get(
+        "JF_DB",
+        str(Path.home() / "Library/Application Support/jellyfin/data/jellyfin.db"),
+    )
+)
+CHANNELS_DIR = STACK_DIR / "config/ersatztv-next/channels"
+LINEUP = STACK_DIR / "config/ersatztv-next/lineup.json"
+OUT = STACK_DIR / "config/ersatztv-next/xmltv.xml"
+
+# Jellyfin BaseItems.Type → XMLTV category. Pipe-separated values map to
+# Jellyfin Live TV's category-filter fields:
+#   Movie:   "Movie"
+#   Series:  "Series"
+#   News:    "News"
+#   Kids:    "Kids" + genre Family/Animation flagged shows
+#   Sports:  "Sports" + Wrestling-tagged
+TYPE_TO_CATEGORIES = {
+    "MediaBrowser.Controller.Entities.Movies.Movie": ["Movie"],
+    "MediaBrowser.Controller.Entities.TV.Episode": ["Series"],
+    "MediaBrowser.Controller.Entities.TV.Series": ["Series"],
+    "MediaBrowser.Controller.Entities.Audio.Audio": ["Music"],
+}
+
+
+def parse_iso(s: str) -> datetime:
+    # RFC 3339 with explicit numeric offset
+    return datetime.fromisoformat(s)
+
+
+def xmltv_dt(s: str) -> str:
+    """Convert RFC 3339 → XMLTV format YYYYMMDDhhmmss ±hhmm."""
+    dt = parse_iso(s)
+    base = dt.strftime("%Y%m%d%H%M%S")
+    off = dt.strftime("%z")  # ±hhmm
+    return f"{base} {off}"
+
+
+def load_lineup() -> list[dict]:
+    with open(LINEUP, "r", encoding="utf-8") as f:
+        return json.load(f)["channels"]
+
+
+def load_playout(channel_num: str) -> dict | None:
+    folder = CHANNELS_DIR / channel_num / "playout"
+    if not folder.is_dir():
+        return None
+    # Pick the playout file whose window contains "now". For first run,
+    # there's typically one file per channel — just grab it.
+    candidates = sorted(folder.glob("*.json"))
+    if not candidates:
+        return None
+    with open(candidates[-1], "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def build_path_index(conn: sqlite3.Connection) -> dict[str, dict]:
+    """Pre-load every BaseItems row that's a Movie/Episode/Audio so we can
+    look up titles + genres by Path without round-tripping the DB once per
+    item. ~28k rows, a few seconds, negligible memory."""
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT Path, Name, Type, Genres, SeriesName, SeasonName, IndexNumber,
+               ProductionYear, Overview
+          FROM BaseItems
+         WHERE Path IS NOT NULL
+           AND Type IN (
+             'MediaBrowser.Controller.Entities.Movies.Movie',
+             'MediaBrowser.Controller.Entities.TV.Episode',
+             'MediaBrowser.Controller.Entities.Audio.Audio'
+           )
+        """
+    )
+    out = {}
+    for row in cur.fetchall():
+        path, name, type_, genres, series, season, idx, year, overview = row
+        out[path] = {
+            "name": name or "",
+            "type": type_,
+            "genres": (genres or "").split("|") if genres else [],
+            "series": series or "",
+            "season": season or "",
+            "index": idx,
+            "year": year,
+            "overview": overview or "",
+        }
+    return out
+
+
+def categories_for(meta: dict) -> list[str]:
+    """Decide XMLTV <category> tags for an item based on Jellyfin metadata."""
+    cats: list[str] = []
+    type_cats = TYPE_TO_CATEGORIES.get(meta["type"], [])
+    cats.extend(type_cats)
+
+    g = {x.lower() for x in meta["genres"]}
+    if g & {"family", "kids", "children's", "children"} or "animation" in g:
+        cats.append("Kids")
+    if "news" in g:
+        cats.append("News")
+    if g & {"sports", "wrestling"} or "wrestling" in meta["series"].lower():
+        cats.append("Sports")
+    return cats
+
+
+def title_for(meta: dict) -> str:
+    """Build a human-readable title. For episodes: 'Series — SxEy — EpName'."""
+    if meta["type"] == "MediaBrowser.Controller.Entities.TV.Episode":
+        series = meta["series"]
+        season = meta["season"]
+        idx = meta["index"]
+        ep_name = meta["name"]
+        if season and idx is not None:
+            # Try to get S/E numbers from "Season N"
+            season_num = season.split()[-1] if season.split() else ""
+            try:
+                s_int = int(season_num)
+                e_int = int(idx)
+                return f"{series} — S{s_int:02d}E{e_int:02d} — {ep_name}"
+            except ValueError:
+                return f"{series} — {season} — {ep_name}"
+        return f"{series} — {ep_name}"
+    if meta["type"] == "MediaBrowser.Controller.Entities.Movies.Movie":
+        if meta["year"]:
+            return f"{meta['name']} ({meta['year']})"
+        return meta["name"]
+    return meta["name"]
+
+
+def episode_num_xmltv_ns(season: str, idx: int) -> str | None:
+    """xmltv_ns format: 'season-1.episode-1.part-of-multipart'. All zero-indexed."""
+    if not season or idx is None:
+        return None
+    season_token = season.split()[-1] if season.split() else ""
+    try:
+        s = int(season_token) - 1
+        e = int(idx) - 1
+        return f"{s}.{e}.0/1"
+    except ValueError:
+        return None
+
+
+def episode_num_onscreen(season: str, idx: int) -> str | None:
+    """onscreen format: SxxExx."""
+    if not season or idx is None:
+        return None
+    season_token = season.split()[-1] if season.split() else ""
+    try:
+        s = int(season_token)
+        e = int(idx)
+        return f"S{s:02d}E{e:02d}"
+    except ValueError:
+        return None
+
+
+def emit_programme(
+    fh, channel_id: str, item: dict, meta_by_path: dict[str, dict], slate_seq: int
+) -> int:
+    src = item.get("source") or {}
+    start = xmltv_dt(item["start"])
+    stop = xmltv_dt(item["finish"])
+    src_type = src.get("source_type", "")
+
+    title = ""
+    sub_title = ""
+    desc = ""
+    cats: list[str] = []
+    rating = ""
+    onscreen = None
+    xmltv_ns_ep = None
+
+    if src_type == "local":
+        path = src.get("path", "")
+        meta = meta_by_path.get(path)
+        if meta:
+            type_cats = TYPE_TO_CATEGORIES.get(meta["type"], [])
+            cats.extend(type_cats)
+            # Add genres as additional categories so Jellyfin filters work
+            for g in meta["genres"]:
+                if g and g not in cats:
+                    cats.append(g)
+            # Kids/Sports/News additions based on genres
+            g_lower = {x.lower() for x in meta["genres"]}
+            if g_lower & {"family", "kids", "children's", "children", "animation"}:
+                if "Kids" not in cats:
+                    cats.append("Kids")
+            if g_lower & {"news"}:
+                if "News" not in cats:
+                    cats.append("News")
+            if g_lower & {"sports", "wrestling"} or "wrestling" in (meta["series"] or "").lower():
+                if "Sports" not in cats:
+                    cats.append("Sports")
+
+            desc = meta["overview"][:1000] if meta["overview"] else ""
+
+            if meta["type"] == "MediaBrowser.Controller.Entities.TV.Episode":
+                title = meta["series"]
+                sub_title = meta["name"]
+                onscreen = episode_num_onscreen(meta["season"], meta["index"])
+                xmltv_ns_ep = episode_num_xmltv_ns(meta["season"], meta["index"])
+            elif meta["type"] == "MediaBrowser.Controller.Entities.Movies.Movie":
+                title = meta["name"]
+                if meta["year"]:
+                    sub_title = str(meta["year"])
+            else:
+                title = meta["name"]
+        else:
+            title = Path(path).stem if path else "(unknown)"
+    elif src_type == "http":
+        title = "Live Stream"
+        desc = src.get("uri", "")
+    elif src_type == "lavfi":
+        title = "Filler"
+        # Distinguish infomercial-hour slate vs ordinary gap filler
+        if "3600" in src.get("params", "") or "60Hz" in src.get("params", ""):
+            sub_title = "Infomercial Hour"
+        slate_seq += 1
+    else:
+        title = "(unknown)"
+
+    fh.write(f'  <programme start="{start}" stop="{stop}" channel="{xml_escape(channel_id)}">\n')
+    fh.write(f'    <title lang="en">{xml_escape(title)}</title>\n')
+    if sub_title:
+        fh.write(f'    <sub-title lang="en">{xml_escape(sub_title)}</sub-title>\n')
+    if desc:
+        fh.write(f'    <desc lang="en">{xml_escape(desc)}</desc>\n')
+    for c in cats:
+        fh.write(f'    <category lang="en">{xml_escape(c)}</category>\n')
+    if onscreen:
+        fh.write(f'    <episode-num system="onscreen">{onscreen}</episode-num>\n')
+    if xmltv_ns_ep:
+        fh.write(f'    <episode-num system="xmltv_ns">{xmltv_ns_ep}</episode-num>\n')
+    fh.write("  </programme>\n")
+    return slate_seq
+
+
+def main() -> int:
+    if not JF_DB.is_file():
+        print(f"Jellyfin DB not found at {JF_DB}", file=sys.stderr)
+        return 2
+    if not LINEUP.is_file():
+        print(f"lineup.json not found at {LINEUP}", file=sys.stderr)
+        return 2
+
+    print(f"Indexing Jellyfin items from {JF_DB} …")
+    conn = sqlite3.connect(f"file:{JF_DB}?immutable=1", uri=True)
+    meta_by_path = build_path_index(conn)
+    print(f"  indexed {len(meta_by_path)} items")
+
+    channels = load_lineup()
+    print(f"Lineup: {len(channels)} channels")
+
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    total_programmes = 0
+    skipped = 0
+
+    with open(OUT, "w", encoding="utf-8") as fh:
+        fh.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+        fh.write('<!DOCTYPE tv SYSTEM "xmltv.dtd">\n')
+        fh.write('<tv generator-info-name="ersatztv-programmer build-xmltv.py" source-info-name="ErsatzTV Next">\n')
+
+        # All channels first
+        for ch in channels:
+            num = ch["number"]
+            name = ch["name"]
+            fh.write(f'  <channel id="{xml_escape(num)}">\n')
+            fh.write(f"    <display-name>{xml_escape(name)}</display-name>\n")
+            # Logo reference (served by nginx-xmltv sidecar)
+            fh.write(
+                f'    <icon src="http://localhost:18408/logos/{num}.png" />\n'
+            )
+            fh.write("  </channel>\n")
+
+        # Programmes per channel
+        for ch in channels:
+            num = ch["number"]
+            playout = load_playout(num)
+            if not playout:
+                skipped += 1
+                continue
+            slate_seq = 0
+            for item in playout.get("items", []):
+                slate_seq = emit_programme(fh, num, item, meta_by_path, slate_seq)
+                total_programmes += 1
+
+        fh.write("</tv>\n")
+
+    print(f"Wrote {OUT}")
+    print(f"  channels: {len(channels)}")
+    print(f"  programmes: {total_programmes}")
+    print(f"  channels without playout: {skipped}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

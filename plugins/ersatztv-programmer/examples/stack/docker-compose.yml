@@ -102,6 +102,45 @@ services:
       retries: 3
       start_period: 10s
 
+  # ---------------------------------------------------------------
+  # iptv-prewarm — workaround for ETV Next's idle-timeout bug.
+  # ---------------------------------------------------------------
+  # ETV Next terminates a channel session ~90s after the last client
+  # request. After that, /session/{N}/live.m3u8 still returns HTTP 200
+  # but the body is an empty playlist (header lines only, no segment
+  # lines listed). Jellyfin Live TV interprets this as a fatal playback
+  # error.
+  #
+  # This sidecar fronts every Jellyfin tune-in: it kicks the upstream
+  # session if cold (by hitting /channel/{N}.m3u8 which spawns the
+  # ffmpeg worker), polls for segments to appear, then proxies the
+  # warm playlist body. Jellyfin sees a valid playlist every time.
+  #
+  # The M3U served by the xmltv sidecar points at /iptv/{N}/live.m3u8
+  # on this proxy instead of straight at ETV. See examples/stack/
+  # iptv-prewarm/iptv-prewarm.py for the source.
+  iptv-prewarm:
+    image: python:3.12-alpine
+    container_name: ersatztv-iptv-prewarm
+    restart: unless-stopped
+    ports:
+      - "${IPTV_PROXY_PORT:-18407}:8407"
+    volumes:
+      - ./iptv-prewarm/iptv-prewarm.py:/app/iptv-prewarm.py:ro
+    environment:
+      ETV_BASE: "http://ersatztv-next:8409"
+      LISTEN_PORT: "8407"
+      TZ: "${TZ:-UTC}"
+    command: ["python3", "/app/iptv-prewarm.py"]
+    depends_on:
+      - ersatztv-next
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8407/iptv/1/live.m3u8', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
   jellyfin:
     image: lscr.io/linuxserver/jellyfin:latest
     container_name: jellyfin
