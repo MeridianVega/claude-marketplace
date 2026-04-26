@@ -1,30 +1,75 @@
 name: ersatztv-stack
 
-# Minimal one-shot stack: ErsatzTV Next + Jellyfin. Drop a lineup.json
-# and per-channel configs into ./config/ersatztv-next/ and Jellyfin will
-# index ./media/ at startup. Use this only as a reference; production
-# users typically extend with Sonarr/Radarr/Bazarr/etc.
+# Full home-media stack: ErsatzTV Next + Jellyfin + the *arr suite +
+# Prowlarr + NZBGet + Jellyseerr. Designed for a clean Docker swap-in
+# that runs alongside any existing native installs on +10000 ports
+# during the transition, then takes over once the native apps are
+# uninstalled and clients are repointed.
 #
-# Host ports use a +10000 offset by default so this stack can run alongside
-# a native ErsatzTV.app or Jellyfin install on the same Mac.
+# Service map and host ports:
+#
+#   ErsatzTV Next   18409   live-TV scheduler + transcoder
+#   Jellyfin        18096   media server
+#   Sonarr          18989   TV show acquisition manager
+#   Radarr          17878   movie acquisition manager
+#   Lidarr          18686   music acquisition manager
+#   Bazarr          16767   subtitle auto-fetcher
+#   Prowlarr        19696   indexer aggregator (feeds Sonarr/Radarr/Lidarr)
+#   NZBGet          16789   Usenet downloader
+#   Jellyseerr      15055   request UI (needs Sonarr+Radarr to fulfill)
+#
+# All bind-mount the same host media volumes at the SAME container path
+# (e.g. /Volumes/Uranus -> /Volumes/Uranus). This means a Sonarr-imported
+# file's path is already what Jellyfin and ETV Next see — no rewriting
+# at any layer.
+#
+# Override any port in .env. Required entries: TZ, PUID, PGID, plus the
+# media-volume host paths (substitute /Volumes/Uranus etc. with whatever
+# your drives are called).
+
+x-puid-pgid: &puid-pgid
+  PUID: "${PUID:-1000}"
+  PGID: "${PGID:-1000}"
+  TZ: "${TZ:-UTC}"
 
 services:
   ersatztv-next:
     image: ghcr.io/ersatztv/next:latest
     container_name: ersatztv-next
     restart: unless-stopped
-    # pull_policy: always means each `docker compose up -d` re-pulls
-    # the :latest tag. Combined with the optional Watchtower service
-    # below, the stack tracks upstream Next without manual intervention.
     pull_policy: always
     ports:
       - "${ERSATZTV_PORT:-18409}:8409"
+    extra_hosts:
+      # Lets ETV Next reach native services on the Mac host during the
+      # tandem-run transition. Drop after cutover.
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./config/ersatztv-next:/config
-      - ./media:/media:ro
+      # Media — read-only, identical host paths preserved so playout
+      # JSON file paths match what Jellyfin reports for the same files.
+      - ${MEDIA_VOL_1:-/Volumes/Uranus}:${MEDIA_VOL_1:-/Volumes/Uranus}:ro
+      - ${MEDIA_VOL_2:-/Volumes/Pluto}:${MEDIA_VOL_2:-/Volumes/Pluto}:ro
+      - ${MEDIA_VOL_3:-/Volumes/Jupiter}:${MEDIA_VOL_3:-/Volumes/Jupiter}:ro
+      - ${MEDIA_VOL_4:-/Volumes/Saturn}:${MEDIA_VOL_4:-/Volumes/Saturn}:ro
+      - ${SHARED_MEDIA:-/Users/Shared/_MEDIA_LIBRARY}:${SHARED_MEDIA:-/Users/Shared/_MEDIA_LIBRARY}:ro
+      # Filler library (optional). See skills/setup/infomercial-filler.md.
+      - ${FILLER_LIBRARY:-/Volumes/Pluto/_FILLER_LIBRARY}:/filler:ro
+      # HLS output — ephemeral.
+      - ${HLS_OUTPUT:-./hls}:/hls
     environment:
       TZ: "${TZ:-UTC}"
     command: ["/config/lineup.json"]
+    healthcheck:
+      # ETV Next exposes channels.m3u once the lineup loads. Marks the
+      # container "unhealthy" if it's crash-looping or hung. Docker's
+      # exponential restart backoff (caps at 60s) handles the actual
+      # restart cadence under unless-stopped.
+      test: ["CMD", "wget", "-qO-", "http://localhost:8409/channels.m3u"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   jellyfin:
     image: lscr.io/linuxserver/jellyfin:latest
@@ -34,17 +79,180 @@ services:
     ports:
       - "${JELLYFIN_PORT:-18096}:8096"
     environment:
-      PUID: "${PUID:-1000}"
-      PGID: "${PGID:-1000}"
-      TZ: "${TZ:-UTC}"
+      <<: *puid-pgid
     volumes:
       - ./config/jellyfin:/config
-      - ./media:/data/media:ro
+      - ${MEDIA_VOL_1:-/Volumes/Uranus}:${MEDIA_VOL_1:-/Volumes/Uranus}:ro
+      - ${MEDIA_VOL_2:-/Volumes/Pluto}:${MEDIA_VOL_2:-/Volumes/Pluto}:ro
+      - ${MEDIA_VOL_3:-/Volumes/Jupiter}:${MEDIA_VOL_3:-/Volumes/Jupiter}:ro
+      - ${MEDIA_VOL_4:-/Volumes/Saturn}:${MEDIA_VOL_4:-/Volumes/Saturn}:ro
+      - ${SHARED_MEDIA:-/Users/Shared/_MEDIA_LIBRARY}:${SHARED_MEDIA:-/Users/Shared/_MEDIA_LIBRARY}:ro
 
-  # Optional: Watchtower auto-pulls + recreates containers when their
-  # base image gets a new tag. Uncomment to enable. Default cadence:
-  # 4 AM local time. Cleans up old image layers after each successful
-  # update (`--cleanup`).
+  # ---------------------------------------------------------------
+  # *arr suite — acquisition, post-processing, and downloader
+  # ---------------------------------------------------------------
+  #
+  # The *arr apps need WRITE access to media volumes (they move
+  # imported downloads into the library) and to the downloads dir
+  # (where NZBGet drops finished jobs).
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    restart: unless-stopped
+    pull_policy: always
+    ports:
+      - "${PROWLARR_PORT:-19696}:9696"
+    environment:
+      <<: *puid-pgid
+    volumes:
+      - ./config/prowlarr:/config
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    restart: unless-stopped
+    pull_policy: always
+    ports:
+      - "${SONARR_PORT:-18989}:8989"
+    environment:
+      <<: *puid-pgid
+    volumes:
+      - ./config/sonarr:/config
+      - ${MEDIA_VOL_1:-/Volumes/Uranus}:${MEDIA_VOL_1:-/Volumes/Uranus}
+      - ${MEDIA_VOL_2:-/Volumes/Pluto}:${MEDIA_VOL_2:-/Volumes/Pluto}
+      - ${MEDIA_VOL_3:-/Volumes/Jupiter}:${MEDIA_VOL_3:-/Volumes/Jupiter}
+      - ${MEDIA_VOL_4:-/Volumes/Saturn}:${MEDIA_VOL_4:-/Volumes/Saturn}
+      - ${SHARED_MEDIA:-/Users/Shared/_MEDIA_LIBRARY}:${SHARED_MEDIA:-/Users/Shared/_MEDIA_LIBRARY}
+      - ${DOWNLOADS_ROOT:-./downloads}:/downloads
+    depends_on:
+      - prowlarr
+      - nzbget
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    restart: unless-stopped
+    pull_policy: always
+    ports:
+      - "${RADARR_PORT:-17878}:7878"
+    environment:
+      <<: *puid-pgid
+    volumes:
+      - ./config/radarr:/config
+      - ${MEDIA_VOL_1:-/Volumes/Uranus}:${MEDIA_VOL_1:-/Volumes/Uranus}
+      - ${MEDIA_VOL_2:-/Volumes/Pluto}:${MEDIA_VOL_2:-/Volumes/Pluto}
+      - ${MEDIA_VOL_3:-/Volumes/Jupiter}:${MEDIA_VOL_3:-/Volumes/Jupiter}
+      - ${MEDIA_VOL_4:-/Volumes/Saturn}:${MEDIA_VOL_4:-/Volumes/Saturn}
+      - ${SHARED_MEDIA:-/Users/Shared/_MEDIA_LIBRARY}:${SHARED_MEDIA:-/Users/Shared/_MEDIA_LIBRARY}
+      - ${DOWNLOADS_ROOT:-./downloads}:/downloads
+    depends_on:
+      - prowlarr
+      - nzbget
+
+  lidarr:
+    image: lscr.io/linuxserver/lidarr:latest
+    container_name: lidarr
+    restart: unless-stopped
+    pull_policy: always
+    ports:
+      - "${LIDARR_PORT:-18686}:8686"
+    environment:
+      <<: *puid-pgid
+    volumes:
+      - ./config/lidarr:/config
+      - ${MEDIA_VOL_1:-/Volumes/Uranus}:${MEDIA_VOL_1:-/Volumes/Uranus}
+      - ${MEDIA_VOL_2:-/Volumes/Pluto}:${MEDIA_VOL_2:-/Volumes/Pluto}
+      - ${DOWNLOADS_ROOT:-./downloads}:/downloads
+    depends_on:
+      - prowlarr
+      - nzbget
+
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    restart: unless-stopped
+    pull_policy: always
+    ports:
+      - "${BAZARR_PORT:-16767}:6767"
+    environment:
+      <<: *puid-pgid
+    volumes:
+      - ./config/bazarr:/config
+      # Bazarr writes .srt files alongside videos — needs RW on media.
+      - ${MEDIA_VOL_1:-/Volumes/Uranus}:${MEDIA_VOL_1:-/Volumes/Uranus}
+      - ${MEDIA_VOL_2:-/Volumes/Pluto}:${MEDIA_VOL_2:-/Volumes/Pluto}
+      - ${MEDIA_VOL_3:-/Volumes/Jupiter}:${MEDIA_VOL_3:-/Volumes/Jupiter}
+      - ${MEDIA_VOL_4:-/Volumes/Saturn}:${MEDIA_VOL_4:-/Volumes/Saturn}
+      - ${SHARED_MEDIA:-/Users/Shared/_MEDIA_LIBRARY}:${SHARED_MEDIA:-/Users/Shared/_MEDIA_LIBRARY}
+    depends_on:
+      - sonarr
+      - radarr
+
+  nzbget:
+    image: lscr.io/linuxserver/nzbget:latest
+    container_name: nzbget
+    restart: unless-stopped
+    pull_policy: always
+    ports:
+      - "${NZBGET_PORT:-16789}:6789"
+    environment:
+      <<: *puid-pgid
+    volumes:
+      - ./config/nzbget:/config
+      - ${DOWNLOADS_ROOT:-./downloads}:/downloads
+
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    restart: unless-stopped
+    pull_policy: always
+    ports:
+      - "${JELLYSEERR_PORT:-15055}:5055"
+    environment:
+      LOG_LEVEL: info
+      TZ: "${TZ:-UTC}"
+    volumes:
+      - ./config/jellyseerr:/app/config
+    depends_on:
+      - jellyfin
+      - sonarr
+      - radarr
+
+  # Dashboard — small nginx serving an index page that links to every
+  # service in this stack with an Open + Setup-instructions button per
+  # card. Runs client-side health probes to show reachability dots.
+  # Visit http://localhost:18080 after `docker compose up -d`.
+  dashboard:
+    image: nginx:1.27-alpine
+    container_name: stack-dashboard
+    restart: unless-stopped
+    pull_policy: always
+    ports:
+      - "${DASHBOARD_PORT:-18080}:80"
+    volumes:
+      - ./dashboard/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./dashboard/entrypoint.sh:/docker-entrypoint.d/00-write-env.sh:ro
+      # html dir is bind-mounted writeable so the entrypoint can drop
+      # env.js next to index.html on each start.
+      - ./dashboard/html:/usr/share/nginx/html
+    environment:
+      ERSATZTV_PORT: "${ERSATZTV_PORT:-18409}"
+      JELLYFIN_PORT: "${JELLYFIN_PORT:-18096}"
+      JELLYSEERR_PORT: "${JELLYSEERR_PORT:-15055}"
+      PROWLARR_PORT: "${PROWLARR_PORT:-19696}"
+      SONARR_PORT: "${SONARR_PORT:-18989}"
+      RADARR_PORT: "${RADARR_PORT:-17878}"
+      LIDARR_PORT: "${LIDARR_PORT:-18686}"
+      BAZARR_PORT: "${BAZARR_PORT:-16767}"
+      NZBGET_PORT: "${NZBGET_PORT:-16789}"
+
+  # ---------------------------------------------------------------
+  # Optional add-ons — uncomment to enable
+  # ---------------------------------------------------------------
+  #
+  # Watchtower auto-pulls + recreates containers when their base image
+  # gets a new tag. Default cadence: 4 AM local. Cleans up old layers.
   #
   # watchtower:
   #   image: containrrr/watchtower:latest

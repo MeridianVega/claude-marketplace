@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Stack Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0b0d10;
+      color: #e4e6eb;
+      min-height: 100vh;
+      padding: 2.5rem 1.5rem 5rem;
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; }
+    h1 { font-size: 1.9rem; font-weight: 600; letter-spacing: -0.02em; margin: 0 0 0.4rem; }
+    .sub { color: #8892a0; margin-bottom: 2.5rem; font-size: 0.95rem; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 1rem;
+    }
+    .card {
+      display: flex;
+      flex-direction: column;
+      background: #14181d;
+      border: 1px solid #222831;
+      border-radius: 10px;
+      padding: 1.1rem 1.2rem;
+      transition: border-color 120ms ease-out, transform 120ms ease-out;
+    }
+    .card:hover { border-color: #3b4553; transform: translateY(-1px); }
+    .card .row { display: flex; align-items: center; gap: 0.55rem; margin-bottom: 0.3rem; }
+    .card .name {
+      font-size: 1.1rem; font-weight: 600;
+      flex: 1;
+    }
+    .card .url {
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      font-size: 0.78rem;
+      color: #6b7685;
+      margin-bottom: 0.45rem;
+      word-break: break-all;
+    }
+    .card .desc {
+      font-size: 0.85rem; color: #8892a0;
+      line-height: 1.45; flex: 1;
+      margin-bottom: 0.9rem;
+    }
+    .card .actions {
+      display: flex; gap: 0.5rem; flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-block;
+      padding: 0.45rem 0.9rem;
+      font-size: 0.8rem;
+      font-weight: 500;
+      border-radius: 6px;
+      text-decoration: none;
+      border: 1px solid transparent;
+      transition: background 120ms, border-color 120ms;
+    }
+    .btn-open  { background: #2563eb; color: #fff; }
+    .btn-open:hover  { background: #1d4ed8; }
+    .btn-docs  { background: transparent; color: #93c5fd; border-color: #1e3a5f; }
+    .btn-docs:hover  { background: #0f1d33; border-color: #2563eb; }
+
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .dot.unknown { background: #4b5563; }
+    .dot.up      { background: #4ade80; }
+    .dot.down    { background: #ef4444; }
+
+    footer {
+      margin-top: 3rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid #222831;
+      font-size: 0.8rem;
+      color: #6b7685;
+    }
+    footer a { color: #93c5fd; text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+    footer code {
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      background: #14181d;
+      padding: 0.1rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.78rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Home media stack</h1>
+    <p class="sub">
+      All services run on +10000 host ports so they coexist with any native apps during transition.
+      Click a service to open its UI. Click <em>Setup</em> for that service's official docs.
+    </p>
+
+    <div class="grid" id="grid"></div>
+
+    <footer>
+      Managed by the
+      <a href="https://github.com/MeridianVega/claude-marketplace" target="_blank" rel="noopener">
+        ersatztv-programmer
+      </a>
+      Claude Code plugin.
+      Stack lives at <code>~/ersatztv-stack/</code>.
+      Health probes run client-side in your browser; they reflect what your machine can reach.
+    </footer>
+  </div>
+
+  <script src="env.js"></script>
+  <script>
+    // env.js sets window.seadog_env.ports to the host-port mapping.
+    // Falls back to the +10000 defaults if env.js is missing or stale.
+    const ports = (window.seadog_env && window.seadog_env.ports) || {};
+    const p = (k, fallback) => ports[k] || fallback;
+
+    const SERVICES = [
+      {
+        id: 'ersatztv',
+        name: 'ErsatzTV Next',
+        url:  `http://${location.hostname}:${p('ersatztv', '18409')}`,
+        desc: 'Live-TV scheduler + transcoder. Channels live here.',
+        docs: 'https://github.com/ErsatzTV/next/blob/main/README.md',
+        health: `http://${location.hostname}:${p('ersatztv', '18409')}/channels.m3u`,
+      },
+      {
+        id: 'jellyfin',
+        name: 'Jellyfin',
+        url:  `http://${location.hostname}:${p('jellyfin', '18096')}`,
+        desc: 'Media server. Browse, stream on-demand, and host the live TV guide.',
+        docs: 'https://jellyfin.org/docs/general/quick-start',
+        health: `http://${location.hostname}:${p('jellyfin', '18096')}/System/Info/Public`,
+      },
+      {
+        id: 'jellyseerr',
+        name: 'Jellyseerr',
+        url:  `http://${location.hostname}:${p('jellyseerr', '15055')}`,
+        desc: 'Request UI. Forwards "I want X" to Sonarr/Radarr.',
+        docs: 'https://docs.jellyseerr.dev/',
+        health: `http://${location.hostname}:${p('jellyseerr', '15055')}/api/v1/status`,
+      },
+      {
+        id: 'prowlarr',
+        name: 'Prowlarr',
+        url:  `http://${location.hostname}:${p('prowlarr', '19696')}`,
+        desc: 'Indexer aggregator. One place for all NZB/torrent indexers.',
+        docs: 'https://wiki.servarr.com/prowlarr/quick-start-guide',
+        health: `http://${location.hostname}:${p('prowlarr', '19696')}/ping`,
+      },
+      {
+        id: 'sonarr',
+        name: 'Sonarr',
+        url:  `http://${location.hostname}:${p('sonarr', '18989')}`,
+        desc: 'TV show acquisition manager. Auto-grabs new episodes as they air.',
+        docs: 'https://wiki.servarr.com/sonarr/quick-start-guide',
+        health: `http://${location.hostname}:${p('sonarr', '18989')}/ping`,
+      },
+      {
+        id: 'radarr',
+        name: 'Radarr',
+        url:  `http://${location.hostname}:${p('radarr', '17878')}`,
+        desc: 'Movie acquisition manager. Watches your wanted list and grabs releases.',
+        docs: 'https://wiki.servarr.com/radarr/quick-start-guide',
+        health: `http://${location.hostname}:${p('radarr', '17878')}/ping`,
+      },
+      {
+        id: 'lidarr',
+        name: 'Lidarr',
+        url:  `http://${location.hostname}:${p('lidarr', '18686')}`,
+        desc: 'Music acquisition manager. Same model as Sonarr but for albums.',
+        docs: 'https://wiki.servarr.com/lidarr/quick-start-guide',
+        health: `http://${location.hostname}:${p('lidarr', '18686')}/ping`,
+      },
+      {
+        id: 'bazarr',
+        name: 'Bazarr',
+        url:  `http://${location.hostname}:${p('bazarr', '16767')}`,
+        desc: 'Subtitle auto-fetcher. Pulls missing tracks from OpenSubtitles.',
+        docs: 'https://wiki.bazarr.media/Getting-Started/Setup-Guide/',
+        health: `http://${location.hostname}:${p('bazarr', '16767')}/api/system/status`,
+      },
+      {
+        id: 'nzbget',
+        name: 'NZBGet',
+        url:  `http://${location.hostname}:${p('nzbget', '16789')}`,
+        desc: 'Usenet downloader. The *arr apps dispatch download jobs here.',
+        docs: 'https://github.com/nzbgetcom/nzbget/wiki',
+        health: null,  // NZBGet defaults to basic auth; skip browser health probe
+      },
+    ];
+
+    // Render
+    const grid = document.getElementById('grid');
+    for (const s of SERVICES) {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML = `
+        <div class="row">
+          <span class="dot unknown" data-id="${s.id}" title="checking..."></span>
+          <span class="name">${s.name}</span>
+        </div>
+        <div class="url">${s.url}</div>
+        <div class="desc">${s.desc}</div>
+        <div class="actions">
+          <a class="btn btn-open" href="${s.url}" target="_blank" rel="noopener">Open</a>
+          <a class="btn btn-docs" href="${s.docs}" target="_blank" rel="noopener">Setup</a>
+        </div>
+      `;
+      grid.appendChild(card);
+
+      // Best-effort health probe. CORS will block reading the response
+      // for most upstream apps, but the request-completes-without-error
+      // signal is enough for an "I can reach it" check.
+      if (s.health) {
+        fetch(s.health, { mode: 'no-cors', cache: 'no-store' })
+          .then(() => markDot(s.id, 'up'))
+          .catch(() => markDot(s.id, 'down'));
+      }
+    }
+
+    function markDot(id, state) {
+      const dot = document.querySelector(`.dot[data-id="${id}"]`);
+      if (!dot) return;
+      dot.classList.remove('unknown', 'up', 'down');
+      dot.classList.add(state);
+      dot.title = state === 'up' ? 'reachable' :
+                  state === 'down' ? 'unreachable' : 'checking...';
+    }
+  </script>
+</body>
+</html>
