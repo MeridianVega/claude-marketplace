@@ -117,14 +117,46 @@ Add a `.gitignore` that excludes `config/jellyfin/data/`, `config/ersatztv-next/
 
 ### 0c. Bring it up
 
+The bundled compose ships **four core services**. The first two are the heart of the stack; the second two are workarounds + glue that any real lineup needs:
+
+| Service | Port | What it does |
+| :--- | :--- | :--- |
+| `ersatztv-next` | 18409 | The IPTV/HLS server (transcoding + streaming) |
+| `jellyfin` | 18096 | The media library (Jellyfin treats ETV Next as an M3U tuner) |
+| `xmltv` (nginx) | 18408 | Static-file sidecar serving the daily routine's outputs: the corrected M3U, generated XMLTV, channel logos |
+| `iptv-prewarm` | 18407 | Wraps tune-ins to work around ETV Next's idle-timeout bug — see "Why iptv-prewarm" below |
+
 ```bash
 cd ~/ersatztv-stack && docker compose up -d
 docker compose ps
-curl -sf http://localhost:18409/channels.m3u  # ETV Next ready when this returns 200
+curl -sf http://localhost:18409/channels.m3u   # ETV Next ready when this returns 200 (raw, unsanitized)
+curl -sf http://localhost:18408/xmltv.xml      # XMLTV sidecar ready when this returns 200
+curl -sf http://localhost:18407/iptv/1/live.m3u8  # Pre-warmer ready when this returns 200
 curl -sf http://localhost:18096/web/index.html  # Jellyfin ready when this returns 200
 ```
 
 First pull is 2–5 minutes on a typical home connection.
+
+#### Why iptv-prewarm (not optional)
+
+ETV Next's session manager terminates a channel session ~90 s after the last client request. After that, `/session/{N}/live.m3u8` still returns HTTP 200 but the body is an **empty playlist** (header lines only, no segment lines). Strict HLS clients including Jellyfin Live TV interpret this as a fatal playback error. Without the proxy, *every* tune-in after the first idle window fails.
+
+The `iptv-prewarm` sidecar (`examples/stack/iptv-prewarm/iptv-prewarm.py`) intercepts requests for `/iptv/{N}/live.m3u8`, kicks `/channel/{N}.m3u8` to wake the session, polls up to 20 s for ffmpeg to write the first segments, then proxies the warm playlist body. Jellyfin sees a valid playlist every tune-in.
+
+The M3U that Jellyfin tunes from points clients at `http://localhost:18407/iptv/{N}/live.m3u8` so every play-attempt routes through the warm-up logic.
+
+Long-term this should be fixed upstream in ETV Next; until then, the sidecar is mandatory.
+
+#### Why the daily routine writes the M3U + XMLTV (not ETV)
+
+ETV Next's own `/channels.m3u` output is malformed (URLs don't end in `\n` before the next `#EXTINF`, so strict parsers see only one channel). It also doesn't emit XMLTV at all (per the upstream README — library/metadata/scheduling/playout creation are intentionally out of scope).
+
+So the plugin's daily routine generates both:
+
+- **`channels.m3u`** via `tools/build-m3u.py` — drops out-of-season holiday channels, sorts alphabetically within bucket, points stream URLs at the iptv-prewarm proxy, includes `tvg-logo` references to the rendered PNGs.
+- **`xmltv.xml`** via `tools/build-xmltv.py` — walks every channel's playout JSON, joins to Jellyfin's BaseItems for title/genre/episode/overview, emits programmes with `<title>` + `<sub-title>` + multi-`<category>` + `<episode-num system="onscreen">SxxExx`.
+
+Both write into `config/ersatztv-next/` which the `xmltv` sidecar serves at `:18408`. **Jellyfin Live TV's M3U Tuner URL must be `http://localhost:18408/channels.m3u` (NOT `:18409`).**
 
 ### 0d. Replicate Jellyfin libraries
 
@@ -140,12 +172,27 @@ Out-of-scope for replication: users, watch history, smart-collection-equivalent 
 
 ### 0e. Wire ETV Next as a Live TV tuner inside Jellyfin
 
-Jellyfin treats ErsatzTV Next as an M3U tuner with XMLTV guide. Inside-container URLs:
+Jellyfin treats ErsatzTV Next as an M3U tuner with XMLTV guide. **The URLs are NOT the ones ETV Next advertises** — see "Why the daily routine writes the M3U + XMLTV" above for why.
 
-- M3U: `http://ersatztv-next:8409/iptv/channels.m3u`
-- XMLTV: `http://ersatztv-next:8409/iptv/xmltv.xml`
+The correct URLs (verified working as of 2026-04-26 against ETV Next `:develop`):
 
-From the host: substitute `localhost:18409`. See [`jellyfin-replicate.md`](./jellyfin-replicate.md) for the exact `POST /LiveTv/TunerHosts` and `POST /LiveTv/ListingProviders` calls.
+| Field | URL |
+| :--- | :--- |
+| **M3U Playlist URL** (Tuner) | `http://localhost:18408/channels.m3u` |
+| **XMLTV URL** (Guide Data Provider) | `http://localhost:18408/xmltv.xml` |
+
+Both are served by the `xmltv` (nginx) sidecar from `config/ersatztv-next/`. The daily routine writes them; Jellyfin reads them.
+
+For Jellyfin's XMLTV listings provider, set the category-filter fields to match what `build-xmltv.py` emits:
+
+| Jellyfin field | Value (pipe-separated) |
+| :--- | :--- |
+| Movie categories | `Movie` |
+| Children's categories | `Kids` |
+| News categories | `News` |
+| Sports categories | `Sports` |
+
+See [`jellyfin-replicate.md`](./jellyfin-replicate.md) for the exact `POST /LiveTv/TunerHosts` and `POST /LiveTv/ListingProviders` API calls. Also see the `reference_jellyfin_api_recipes` memory if Claude is iterating: it documents the scheduled-task IDs for `Refresh Guide` (`bea9b218c97bbf98c5dc1303bdb9a0ca` on 10.10) and `TasksRefreshChannels` (M3U tuner reload — `0c9ee3a88fc15547c6852205480da1fd`).
 
 ### 0f. Record stack state
 
@@ -155,8 +202,12 @@ docker_stack:
   compose_file: ~/ersatztv-stack/docker-compose.yml
   ersatztv_port: 18409
   jellyfin_port: 18096
+  iptv_proxy_port: 18407          # iptv-prewarm — Jellyfin tunes through here
+  xmltv_port: 18408               # nginx sidecar — Jellyfin's M3U + XMLTV come from here
   jellyfin_libraries_replicated: [Movies, Shows, Wrestling, Music, "Lost Media"]
   live_tv_tuner_configured: true
+  live_tv_m3u_url: http://localhost:18408/channels.m3u
+  live_tv_xmltv_url: http://localhost:18408/xmltv.xml
 ```
 
 ## Step 1 — Media-server access
@@ -314,6 +365,49 @@ channels:
 ```
 
 Channel-number space: leave gaps (1–9 for primary core, 10–99 for the rest of core, 100–199 for rotating, 200–299 for music, 300–399 for live, 900–999 for experimental — adjust per personal preference).
+
+## Step 3.4 — Per-channel typography (recommended for ≥30 channels)
+
+The default logo classifier in `tools/render-logo.py` covers common genres but falls back to a generic bucket-default when a channel name doesn't match a built-in rule. For a 75-channel lineup that fallback produces visually monotone logos.
+
+Curate per-channel font + color picks via a JSON config and pass it with `--config`:
+
+```bash
+# ~/ersatztv-stack/tools/channel-fonts.json
+{
+  "exact_matches": {
+    "Primetime":          "primetime_premium",
+    "24/7 Wrestling":     "wrestling_promo",
+    "The Vault":          "the_vault",
+    "Skunk Works":        "stealth_ops",
+    ...
+  },
+  "presets": {
+    "primetime_premium":  ["PlayfairDisplay-Regular.ttf", "#D4AF37", "#2D1F0A", 36],
+    "wrestling_promo":    ["BlackOpsOne-Regular.ttf",     "#FF2222", "#FFD700", 32],
+    "the_vault":          ["Bodoni-Regular.ttf",          "#DAA520", "#2D0A0A", 36],
+    "stealth_ops":        ["BlackOpsOne-Regular.ttf",     "#B8860B", "#1C1C1C", 32],
+    ...
+  }
+}
+```
+
+Then per channel:
+
+```bash
+render-logo.py --name "The Vault" --bucket core \
+    --config ~/ersatztv-stack/tools/channel-fonts.json \
+    --out ${CHANNELS_DIR}/25/logo.png
+```
+
+The classifier checks `exact_matches` first (case-insensitive), and the user's `presets` extend/override the built-in preset table. Plugin-shipped presets stay generic; user-specific channel names live in user-space.
+
+Record the location:
+
+```yaml
+typography:
+  channel_fonts_config: ~/ersatztv-stack/tools/channel-fonts.json
+```
 
 ## Step 3.5 — Channel logos
 
