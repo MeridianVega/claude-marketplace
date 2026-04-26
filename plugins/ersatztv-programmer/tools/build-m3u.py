@@ -150,12 +150,17 @@ def main() -> int:
     # Sort: bucket order, then alphabetical by name (case-insensitive)
     rows.sort(key=lambda r: (BUCKET_ORDER.get(r["bucket"], 99), r["name"].lower()))
 
-    # Emit
+    # Emit. Critical: tvg-id == tvg-chno (the alphabetical display position),
+    # NOT the underlying lineup.json channel number. Jellyfin's M3U tuner uses
+    # tvg-chno (or tvg-id when no chno) as the channel's "Number" field, and
+    # XMLTV's <channel id="N"> must match that number for guide-data matching
+    # to work. Stream URL still uses the lineup.json number (the iptv-prewarm
+    # proxy + ETV Next still know the channel by its native number).
     OUT.parent.mkdir(parents=True, exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:
         f.write("#EXTM3U\n")
         for chno, r in enumerate(rows, start=1):
-            num = r["num"]
+            num = r["num"]              # ETV/lineup native channel number
             name = r["name"]
             group = r["group"]
             logo = f"{SIDECAR_BASE}/logos/{num}.png"
@@ -163,7 +168,7 @@ def main() -> int:
             # XML-escape the name for inside the comma-suffixed display field
             disp_name = name.replace("&", "&amp;")
             f.write(
-                f'#EXTINF:-1 tvg-chno="{chno}" tvg-id="{num}" tvg-name="{disp_name}" '
+                f'#EXTINF:-1 tvg-chno="{chno}" tvg-id="{chno}" tvg-name="{disp_name}" '
                 f'tvg-logo="{logo}" group-title="{group}",{disp_name}\n'
             )
             f.write(url + "\n")
