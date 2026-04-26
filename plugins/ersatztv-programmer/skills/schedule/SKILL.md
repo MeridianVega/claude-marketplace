@@ -185,6 +185,76 @@ The `ersatztv-setup` wizard organizes channels into **five buckets** that sum to
 
 When the daily refresh routine fires (default cadence: midnight local, see [`setup` skill](../setup/SKILL.md) Step 4), iterate `config.yaml`'s buckets in this order: `live` (cheapest — no MCP query), `music`, `core`, `rotating`, `experimental`. This puts the most stable buckets first so a partial run still produces useful results if the routine is interrupted.
 
+## The midnight–1 AM slot — bucket-aware late-night filler
+
+Every channel reserves the **12 AM–1 AM local-time block** for filler so the daily refresh routine has a low-stakes window to write new playouts. The slot is also the **last hour viewers see** before fresh programming kicks in — bad filler ruins the channel feel for an hour every night.
+
+Default approach is **theme-matched late-night content from the user's existing library**, NOT acquired infomercials. Acquisition (yt-dlp from Internet Archive — see [`setup/infomercial-filler.md`](../setup/infomercial-filler.md)) is a fallback for users who genuinely want that 1990s late-night-cable nostalgia and have the disk space.
+
+The picker the subprogrammer uses, by bucket:
+
+### `core` channels — three sub-rules
+
+The core bucket is the densest part of the lineup; the picker varies by channel character:
+
+- **Genre channels** (Action, Drama, Horror, Scifi, etc.) — pick **one documentary episode** whose subject matches the channel theme. NOVA, Cosmos, Anthony Bourdain Parts Unknown, Ken Burns specials, Planet Earth-style. Match by genre/tag overlap.
+  - Example: Channel 19 *Nature* → NOVA episode about wildlife.
+  - Example: Channel 13 *Scifi* → a Cosmos episode (Carl Sagan/Tyson — both fit the channel feel).
+  - Example: Channel 18 *Cooking TV* → Anthony Bourdain Parts Unknown.
+  - Why: Documentaries are calm, ~55 min (perfect 12am–1am fit), and the theme overlap means the channel still feels like itself at 12:30am.
+- **Show-block channels** (Friends, Adult Animation, Saturday Morning, etc.) — continue the channel's signature show into a "sleeper episode." Friends 24/7 just plays the next Friends. Adult Animation plays a King of the Hill late-night episode. Saturday Morning runs a calm late-night cartoon.
+- **Wrestling channels** — Channel 34 (24/7 Wrestling) keeps mixing wrestling continuously, no break. Channel 35 (PPV Time Machine) goes to its standard countdown slate.
+
+### `rotating` channels
+
+Theme-matched documentary or short film. Use the channel's `current_theme` to pick — Director Spotlight runs an extra short film by the chosen director, Decade Deep Dive runs an era-matched documentary, etc.
+
+### `music` channels
+
+**No break.** Music keeps playing — just continue the queue. Songs already fit the late-night vibe; switching to anything else would break flow. The "filler" here is just more of the same channel.
+
+### `live` channels
+
+**Static slate** — ETV does not transcode an `http` source into a 1-hour filler item. Either:
+- Emit a `lavfi` slate (`color=c=0x101010 ... + sine`) as a single item, OR
+- Skip the slot entirely (channel goes dark for an hour, valid since live URLs may already be intermittent)
+
+The point: don't burn CPU on a live-channel "filler" — there's nothing to transcode that wouldn't work better as a static placeholder.
+
+### `experimental` channels
+
+**Continue the current format.** If the week's format is "Pilot Pile," the 12am–1am hour just plays another pilot. If it's "Cold Open," another 10-minute show start. The format is the channel; don't break it for a filler block.
+
+### `holiday` core channels (31 Halloween, 32 Thanksgiving, 33 Christmas)
+
+When out-of-season, the channel is disabled entirely from the lineup (no playout emitted). When in-season, follow the genre-channel rule: pick a theme-matched documentary or short.
+
+### Implementation note for the subprogrammer
+
+The subprogrammer queries Jellyfin SQLite for documentary episodes matching the channel's theme by (1) `Genres` overlap and (2) `Type='MediaBrowser.Controller.Entities.TV.Episode'` AND `SeriesName` matches a known doc-show list (NOVA, Cosmos, Anthony Bourdain - Parts Unknown, etc. — extend as the user's library grows).
+
+Recommended SQL (schedule skill recipe):
+
+```sql
+SELECT Path, RuntimeTicks/10000000.0 AS dur_s, SeriesName, Name, Genres
+  FROM BaseItems
+ WHERE Type='MediaBrowser.Controller.Entities.TV.Episode'
+   AND SeriesName IN ('NOVA','Cosmos','Cosmos: A Spacetime Odyssey',
+                      'Anthony Bourdain - Parts Unknown',
+                      'Anthony Bourdain - No Reservations',
+                      'Planet Earth','Planet Earth II','Blue Planet',
+                      'A Cook''s Tour','Chef''s Table',
+                      'Jim Henson''s The Storyteller',
+                      'Bill Nye - The Science Guy','Horizon')
+   AND RuntimeTicks BETWEEN 30000000000 AND 65000000000  -- 50–108 minutes
+ ORDER BY random()
+ LIMIT 1;
+```
+
+Filter by genre/tag overlap with the channel's theme to pick the most-coherent doc.
+
+Fall-through: if the user's library has no documentary that matches the channel theme, fall back to a **lavfi color slate** with the channel's logo as a still image — quiet, branded, harmless. Don't pull random non-thematic content into the slot.
+
 ## Claude curates, scripts don't (load-bearing)
 
 This is the single most important rule in this skill. The user has stated
