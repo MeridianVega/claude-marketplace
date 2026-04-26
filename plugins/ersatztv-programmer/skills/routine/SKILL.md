@@ -111,11 +111,20 @@ Write `state/director-picks.json` with the leaderboard + one-line directors_note
 
 Capture the directors_note for the summary report.
 
-### Phase 3 — Render bumpers
+### Phase 3 — Render + splice bumpers
 
-Run `${STACK_DIR}/tools/build-bumpers.py` (no flags — it auto-resolves today's date and reads `bumper-voices.json`). The renderer emits 15–18s MP4s under `${STACK_DIR}/bumpers/{YYYY-MM-DD}/{N}/{HHMM}-{kind}.mp4` mixing personality / up-next / block-summary types per primetime hour.
+Run two scripts in sequence:
 
-After rendering completes, splice each rendered bumper into the channel's playout as a `local` source replacing the trailing 15s of music filler before the on-the-hour program. Re-run `playout-validate.py` after the splice for each modified channel.
+```bash
+python3 "${STACK_DIR}/tools/build-bumpers.py"
+python3 "${STACK_DIR}/tools/splice-bumpers.py"
+```
+
+**`build-bumpers.py`** reads `tools/bumper-voices.json` + `tools/channel-fonts.json`, walks each channel's playout, finds every `:00` and `:30` clean-clock primetime boundary, and renders a static-image bumper card per boundary mixing the three types (personality 60% / up-next 30% / block-summary 10%). Output: `${STACK_DIR}/bumpers/{YYYY-MM-DD}/{N}/{HHMM}-{kind}.mp4` — 15–18s, ~290 KB each.
+
+**`splice-bumpers.py`** then walks each channel's playout JSON and splices each rendered bumper as a `local` source replacing the trailing 15–18 seconds of music filler before each scheduled `:00` / `:30` boundary. Splices ONLY into music/lavfi filler items — never into real programs. Updates the playout file in place.
+
+Re-run `playout-validate.py` on each modified channel after splicing (`splice-bumpers.py` does this implicitly via the next phase's auditor).
 
 ### Phase 4 — Generate M3U + XMLTV
 
