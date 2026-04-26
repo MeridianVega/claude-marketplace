@@ -76,8 +76,10 @@ def main() -> int:
     ap.add_argument("--channel", help="Probe only this channel number.")
     ap.add_argument("--skip", default="31,32,33",
                     help="Comma-separated channels to skip (default: out-of-season holiday).")
-    ap.add_argument("--parallel", type=int, default=3,
-                    help="Concurrent probes. Keep low — each probe costs an ffmpeg session.")
+    ap.add_argument("--parallel", type=int, default=1,
+                    help="Concurrent probes. Default 1 to avoid CPU contention with active viewers — each probe costs an ffmpeg session that lingers ~60s before idle-timeout.")
+    ap.add_argument("--settle-seconds", type=float, default=3.0,
+                    help="Sleep between sequential probes to let prior session start idling (default 3s; only applies when parallel=1).")
     ap.add_argument("--json", action="store_true", help="Output JSON-only.")
     args = ap.parse_args()
 
@@ -94,20 +96,37 @@ def main() -> int:
         channels = [c for c in channels if c["number"] not in skip]
 
     results = []
-    with ThreadPoolExecutor(max_workers=args.parallel) as pool:
-        futures = {
-            pool.submit(probe_channel, c["number"], c["name"], args.prewarm, args.timeout): c
-            for c in channels
-        }
-        for fut in as_completed(futures):
-            r = fut.result()
+    if args.parallel == 1:
+        # Sequential mode — gentle on CPU; safe to run while clients are watching.
+        for i, c in enumerate(channels):
+            r = probe_channel(c["number"], c["name"], args.prewarm, args.timeout)
             results.append(r)
             if not args.json:
                 marker = "ok" if r["ok"] else "FAIL"
                 print(
                     f"  ch{r['channel']:>4} {r['name']:<22} "
-                    f"{marker:>4} ({r['elapsed_s']}s, {r['segments']} segs) {r['reason']}"
+                    f"{marker:>4} ({r['elapsed_s']}s, {r['segments']} segs) {r['reason']}",
+                    flush=True,
                 )
+            if i + 1 < len(channels) and args.settle_seconds > 0:
+                time.sleep(args.settle_seconds)
+    else:
+        # Parallel mode — faster but may saturate CPU on small hosts.
+        with ThreadPoolExecutor(max_workers=args.parallel) as pool:
+            futures = {
+                pool.submit(probe_channel, c["number"], c["name"], args.prewarm, args.timeout): c
+                for c in channels
+            }
+            for fut in as_completed(futures):
+                r = fut.result()
+                results.append(r)
+                if not args.json:
+                    marker = "ok" if r["ok"] else "FAIL"
+                    print(
+                        f"  ch{r['channel']:>4} {r['name']:<22} "
+                        f"{marker:>4} ({r['elapsed_s']}s, {r['segments']} segs) {r['reason']}",
+                        flush=True,
+                    )
 
     failed = [r for r in results if not r["ok"]]
     if args.json:
