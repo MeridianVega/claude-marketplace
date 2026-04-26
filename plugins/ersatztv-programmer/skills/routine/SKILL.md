@@ -160,20 +160,28 @@ Determine **PASS** vs **BLOCK**:
 If **PASS** → continue to Phase 6.
 If **BLOCK** → skip Phase 6. Include the full punch list in the summary report. Stop.
 
-### Phase 6a — Restart ETV Next (load fresh state after the rewrites)
+### Phase 6a — Restart ETV Next + per-channel stream probe
 
 ETV's hot-reload doesn't survive substantial mid-session config or playout-filename changes — sessions cache the first playout filename they see, ffmpeg processes accumulate stale `output_ts_offset` values, and `/session/{N}/live.m3u8` ends up returning empty playlists despite valid headers (clients hang on "loading"). After the routine has rewritten 75 channel.json + 75 playout JSON files, restart ETV so it re-scans the playout folder fresh:
 
 ```bash
 docker compose -f "${STACK_DIR}/docker-compose.yml" restart ersatztv-next
-sleep 8
-# Sanity probe — first programmed channel should produce segments
-if ! curl -sf -m 5 "http://localhost:18409/session/1/live.m3u8" | grep -q "EXTINF"; then
-  echo "WARNING: ch1 session has no segments post-restart — investigate before refreshing guide"
-fi
+sleep 12
 ```
 
 Restart kills in-flight ffmpeg processes, so viewers actively watching see ~5–10s of buffering. The 1:07 AM routine fires during the user's filler hour (12am–1am content is generic anyway), so this is invisible to actual viewers.
+
+Then **stream-probe every channel** to catch real playback failures the JSON-level audit misses. A valid playout doesn't guarantee ETV will actually start a session for that channel — sometimes ETV's lineup loader silently skips a channel for esoteric reasons (subtle JSON-shape difference, missing media, etc).
+
+```bash
+python3 "${STACK_DIR}/tools/probe-streams.py" --parallel 3 --timeout 35
+```
+
+For each channel in lineup.json (minus out-of-season holiday channels), the probe hits the prewarm sidecar's `/iptv/{N}/live.m3u8`, asserts HTTP 200 within 35 s, and asserts the response contains ≥ 2 `.ts` segment refs. Output one line per channel: `ok` or `FAIL: <reason>`.
+
+The probe takes 5–10 min for a 72-channel lineup at parallel-3. Each cold tune costs an ffmpeg session, so don't crank parallelism past 4 on a 12-core M-series.
+
+Probe failures are surfaced in the routine summary. They do NOT block the Jellyfin guide refresh — a partially-broken lineup is still better than yesterday's stale guide. But the user sees the failed-channel list and can investigate.
 
 ### Phase 6 — Refresh Jellyfin guide (only if Phase 5 PASS)
 
