@@ -82,7 +82,65 @@ Between programs on programmed channels, viewers see **brand-themed music filler
    - **Skip out-of-season holiday channels.** Halloween (31): only emit Sep 15 – Oct 31. Thanksgiving (32): only emit week before Thanksgiving through Thanksgiving Day. Christmas (33): only emit Dec 1 – Dec 26. Outside those windows, the channel is excluded entirely from this run and from M3U/XMLTV emission. (Persisted handling: keep `lineup.json` complete; the M3U/XMLTV generators read the same season rules and skip silently.)
 5. Create `${STACK_DIR}/state/` if missing. Note the routine start time for the summary report.
 
-### Phase 1 — Per-channel programming (single-agent inline)
+### Phase 1 — Per-channel programming (block-aware, week-planning)
+
+**Programming model: 1990s broadcast TV.** Each channel has named dayparts (morning / daytime / late-afternoon / primetime / late-night / overnight) with consistent character per day-of-week. Tentpole shows occupy fixed weeknight slots and advance one episode per week. Same series never airs back-to-back; the rebuild persists a sliding window of recently-aired series per channel and rejects repeats.
+
+**State per channel** lives at `${STACK_DIR}/state/{N}/state.json`:
+
+```json
+{
+  "blocks": {
+    "morning":   {"hours": [5, 9],   "character": "..."},
+    "daytime":   {"hours": [9, 16],  "character": "..."},
+    "afternoon": {"hours": [16, 19], "character": "..."},
+    "primetime": {"hours": [19, 23], "character": "..."},
+    "latenight": {"hours": [23, 25], "character": "..."}
+  },
+  "slot_anchors": {
+    "Tue-21": {
+      "primary": "The Leftovers",
+      "next_episode": {"season": 1, "episode": 5},
+      "primary_season_window": ["10-01", "12-15"],
+      "off_season_pool": ["The Wire", "Lost", "Boardwalk Empire"],
+      "last_aired_in_slot": "2026-04-22"
+    }
+  },
+  "series_cursors": {"The Wire": {"season": 2, "episode": 7}, "Lost": ...},
+  "last_aired_series": ["Lost", "The Wire", "Lost"]
+}
+```
+
+**Rebuild algorithm:**
+
+```
+For each channel:
+  Load state.json (blocks, slot_anchors, series_cursors, last_aired_series).
+  For each clean-clock slot 01:00 to 23:30:
+    1. Determine block (morning/daytime/...) for the slot's hour.
+    2. If the slot is anchored (matches today's weekday + hour in slot_anchors):
+       - If primary's season window covers today: pick primary's next_episode; advance cursor.
+       - Else: pick off_season_pool member with longest-ago last_aired_in_slot; advance THAT show's cursor.
+    3. If not anchored:
+       - Use the block's character to query candidate set (genre/series filter from channel-genres.json).
+       - Reject any candidate whose SeriesName is in last_aired_series[-3:] (no back-to-back-ish dupes).
+       - For TV: pick the next sequential episode of the chosen series (advance series_cursor).
+       - For movies: random within filter, no recent dupes.
+    4. Place item, append SeriesName to last_aired_series (sliding window of 5).
+  Write playout JSON.
+  Persist state.json with all advanced cursors.
+```
+
+**Hard rules** the rebuild MUST honor (final-auditor verifies):
+1. **No back-to-back same-series** (unless explicit marathon channel for that day).
+2. **Sequential episode advancement** — when a series re-appears in the same slot week-over-week, it's the next episode, not random.
+3. **Block consistency** — the structure of "Tuesday 8 PM = sitcom block, 9 PM = drama tentpole" is the same every Tuesday.
+4. **Anchored slots prevail** — if a tentpole is set for Tue-21, that slot gets THAT series, not a random from the pool.
+5. **State persistence** — cursors advance + last_aired_in_slot updates BEFORE the playout is written; partial runs don't corrupt state.
+
+See `feedback_block_aware_programming` memory for full spec + 90s broadcast vision.
+
+### Phase 1.5 — Legacy: per-channel programming (single-agent inline) [DEPRECATED — replaced by block-aware above]
 
 **Architecture note (2026-04-26):** the plugin originally specified subagent fan-out (orchestrator → per-channel subprogrammers + auditors). Claude's current runtime doesn't honor `Agent(...)` permissions in non-root subagents, so fan-out is shelved until plist migration. For now, the routine runs as ONE agent — typically main Claude when CronCreate fires, or a single subagent when launchd fires `claude --print`. That single agent plays every role (subprogrammer, channel-auditor, director, final-auditor) inline. See `feedback_agent_team_pattern` memory for the full rationale.
 
