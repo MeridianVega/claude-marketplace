@@ -8,15 +8,122 @@ ErsatzTV Next is a transcoding and streaming engine. It consumes **playout JSON*
 
 Channels feel like real networks: HBO Style runs prestige drama Sunday nights; Adult Animation deadpans "we hope you get fired" between shows; Time Machine PPV plays the wrestling card that aired on this exact day in 1993. Bumper voice lines are per-channel personality (Adult Swim style); top-rated channels get an `[Editor's Pick]` tag in the EPG.
 
-## How you use it — three opt-in tiers
+## From scratch — every step, nothing skipped
 
-| Tier | What you do | What runs in the background | When to choose it |
-| :--- | :--- | :--- | :--- |
-| **Manual** *(default)* | Run `/ersatztv-program` whenever you want to build or rebuild a channel. | Nothing. ErsatzTV Next streams whatever JSON exists; channels keep playing without further action. | You program rarely, want full control, or are still figuring out what kinds of channels you want. |
-| **Nightly routine** *(opt-in)* | Run `/ersatztv-setup`, lock in channel preferences, register a recurring schedule. The routine fires `/ersatztv-programmer:routine` at your chosen time. | Each fire rebuilds every channel's playout for the next 24 h, scores via the **director** agent, renders voice bumpers, regenerates M3U + XMLTV, runs the **final-auditor** gate, and refreshes Jellyfin's guide on PASS. | You want a "set it and forget it" lineup that rotates fresh content nightly. |
-| **Hybrid** | Use `/ersatztv-program` for one-offs *and* keep the nightly routine running. | Routine runs as in tier 2; ad-hoc requests run on demand. | The common case once you've used the plugin for a while. |
+This is the complete path from zero (no Docker, no ErsatzTV, no plugin installed) to a working 75-channel lineup playing on a Jellyfin client. The `/ersatztv-setup` skill walks you through most of it interactively; this section explains what you'll do at each step so you know what to expect.
 
-Nothing is auto-installed beyond the plugin itself. No routine fires until you explicitly opt in via `/ersatztv-setup`.
+### Step 0 — Prerequisites (one-time, system-level)
+
+| Need | Install path | Verify |
+| :--- | :--- | :--- |
+| **Docker Desktop** (macOS/Windows) or **Docker Engine** (Linux) | https://www.docker.com/products/docker-desktop/ | `docker run --rm hello-world` prints "Hello from Docker!" |
+| **Claude Code** CLI | https://claude.com/claude-code | `claude --version` works |
+| **ffmpeg** | macOS: `brew install ffmpeg`; Linux: `apt install ffmpeg`; Windows: chocolatey | `ffmpeg -version` works |
+| **Python 3.8+** | Usually already on macOS/Linux. Windows: python.org installer. | `python3 --version` returns 3.8 or higher |
+| **Pillow** (for bumper PNGs) | `pip install Pillow` | `python3 -c "import PIL; print('ok')"` |
+| **A media server** (Jellyfin / Plex / Emby) with your library scanned | https://jellyfin.org/downloads/ | Web UI loads at e.g. `http://localhost:8096` |
+
+Test each one before moving on. If `docker run --rm hello-world` fails, the rest won't work.
+
+### Step 1 — Install the plugin
+
+In a Claude Code session:
+
+```text
+/plugin marketplace add MeridianVega/claude-marketplace
+/plugin install ersatztv-programmer@meridianvega
+```
+
+The plugin is now available. Restart Claude Code if it doesn't pick up the new slash commands automatically.
+
+### Step 2 — Run the first-run setup wizard
+
+```text
+/ersatztv-setup
+```
+
+The wizard walks you through, in order:
+
+1. **System setup (skip if you already have ETV Next running):** detects Docker, asks where your media library lives, drops in the bundled `examples/stack/docker-compose.yml`, brings up the stack with `docker compose up -d`. Verifies Jellyfin + ETV Next + the XMLTV nginx sidecar + the iptv-prewarm sidecar all come up healthy.
+2. **Media server connection:** asks which server (Jellyfin/Plex/Emby) and configures direct SQLite access (Jellyfin) or an MCP. Stores nothing in plugin config — the token lives in your shell env.
+3. **ErsatzTV paths:** locates `lineup.json` + `channels/{N}/channel.json` files, parses what's there, lists existing channels.
+4. **Channel preferences:** asks if you want to lock in a default 75-channel lineup or build channels ad-hoc. Default lineup ships ready (5 buckets: 35 Core / 10 Rotating / 10 Music / 10 Live / 10 Experimental).
+5. **Routine setup:** asks if you want the daily refresh routine scheduled. macOS users get a launchd plist generator; Linux gets systemd timer; Windows gets Task Scheduler.
+
+At the end, your stack is up, channels are defined, the daily routine is scheduled.
+
+### Step 3 — Plan the quarter
+
+```text
+/ersatztv-programmer:plan
+```
+
+The Studio Head — `channel-planner` agent per channel — surveys the entire Jellyfin library, picks 3-5 anchor TV series per channel that own a fixed weeknight primetime slot for the show's full run, and writes a 12-week plan to `state/{N}/quarter-plan.json`.
+
+This is the strategic layer. Anchors hold their slot for 50+ weeks if their episode count supports it (e.g., *The Wire* runs Tuesday 9 PM weekly through 5 seasons). Hot new arrivals get promoted to next week's primetime. Bottom-3-rated channels get re-plan mandates.
+
+Run weekly, or whenever you add a major new show to the library.
+
+### Step 4 — Run today's daily routine
+
+```text
+/ersatztv-programmer:routine
+```
+
+This is the daily refresh. It runs Phase 0–6 of the routine skill:
+
+- **Phase 0:** discover the lineup, set today's calendar-day window
+- **Phase 1:** for each channel, read the quarterly plan + per-channel `state.json` cursors. Slot the next-in-queue episode for each anchor weeknight slot (sequential, no random). Fill non-anchored slots from the channel's filter pool with no back-to-back same-series. Persist cursor advancement to `state.json`.
+- **Phase 2:** director scores each channel 0-100 against seven signals; writes `state/director-picks.json` + appends to `ratings-history.json`. Top-3 get newly-added priority queue.
+- **Phase 3:** render voice-driven bumper PNGs (per-channel personality cards) + splice into the trailing music filler before each clean-clock primetime boundary. Music plays under the deco card for the full filler period.
+- **Phase 4:** regenerate `channels.m3u` + `xmltv.xml`. Filler items merge into a single "Station Break" programme entry per gap so the EPG stays readable.
+- **Phase 4.5:** run `audit-content.py` — hard-fails on holiday content on non-holiday channels, blacklisted series, off-genre. Surgically replaces violators with non-violating alternatives.
+- **Phase 5:** final-auditor — verifies the whole stack is consistent. Returns PASS or BLOCK.
+- **Phase 6a:** restart ETV Next (forces it to load the new playouts cleanly), then stream-probe every channel.
+- **Phase 6b:** on PASS, refresh Jellyfin's guide via the ScheduledTasks API. On BLOCK, skip the refresh — better stale-but-correct than fresh-but-broken.
+
+The routine prints a one-message summary: per-channel statuses, director's note, audit result, Jellyfin refresh outcome. Around 5-10 minutes for a 75-channel lineup.
+
+### Step 5 — Watch in your client
+
+Open Jellyfin (or any client tuned to the M3U at `http://localhost:18408/channels.m3u`). The 75-channel lineup is live. Tune any channel; first cold tune is ~10-15s while ffmpeg spins up; subsequent tunes are instant.
+
+### Step 6 — Day-to-day
+
+The cron from Step 2 fires the daily routine at 1:07 AM (during the dedicated 12am-1am filler hour). You don't have to do anything — it runs while you're asleep, and the new schedule is live by morning.
+
+Manually re-run `/ersatztv-programmer:plan` when you add a major new show; it'll get promoted to next week's primetime if the director scores its channel high enough.
+
+For a one-channel rebuild (mid-day), use `/ersatztv-program {channel}` — only that channel rebuilds; nothing else changes.
+
+## How you use it day-to-day
+
+| Slash command | What it does | When to run it |
+| :--- | :--- | :--- |
+| `/ersatztv-setup` | First-run wizard: Docker stack, media-server connection, ErsatzTV paths, channel preferences. | Once at install. Re-run to change settings. |
+| `/ersatztv-programmer:plan` | **Studio Head** — quarterly per-channel strategy. Picks anchor TV series for primetime weeknight slots; plans 12 weeks. Writes `state/{N}/quarter-plan.json`. | Once a week (Sunday) or whenever you add a hot new show. |
+| `/ersatztv-programmer:routine` | **Daily refresh** — rebuilds every channel's playout for today, scores via director, renders bumpers, regenerates M3U + XMLTV, refreshes Jellyfin's guide. | Once a day. Schedule for ~1 AM during the filler hour. |
+| `/ersatztv-program {channel}` | **One-channel ad-hoc rebuild.** | When you want to redo a specific channel without waiting for the nightly routine. |
+| `/ersatztv-audit` | **Migration audit** — diffs an existing ErsatzTV Legacy install against the Next stack. | Once during a Legacy → Next migration. |
+| `/ersatztv-librarian` | **Acquisitions** — finds gaps in the library and suggests downloads via NZBGet/Sonarr/Radarr. | When channels run library-thin. |
+
+## The studio architecture
+
+The plugin operates as a coordinated TV programming studio — multiple specialist agents working together, all chasing ratings on the director's scorecard:
+
+| Studio role | Plugin agent / tool | Cadence |
+| :--- | :--- | :--- |
+| **Head of Programming** (Strategy) | `agents/channel-planner.md` | Weekly — quarterly plans, tentpole rotation, hot-new-arrival promotion |
+| **Director of Programming** (Ratings) | `agents/director.md` | Daily — scores each channel 0-100, awards Top-3, flags Bottom-3 |
+| **Channel Programmer** (Scheduling) | `agents/subprogrammer.md` | Daily — fills the day's slots from the quarterly plan |
+| **Standards & Practices** | `tools/audit-content.py` + `tools/channel-genres.json` | Daily — holiday quarantine, off-genre rejection, blacklist enforcement |
+| **Promotions** | `tools/build-bumpers.py` + `bumper-voices.json` | Daily — voice-driven personality bumper cards |
+| **Continuity** | `tools/splice-bumpers.py` + filler deco PNGs | Daily — smooth transitions; bumper-card-as-deco for the full filler period |
+| **Research** (Audience) | `state/ratings-history.json` | 30-day rolling — informs strategic decisions |
+| **Acquisitions** | `agents/librarian.md` | On library-thin signal |
+| **Master Control** | the routine + ETV Next | Daily — broadcasts the schedule |
+
+Each role chases ratings. Top-3 channels next week get newly-added priority (first dibs on hot new content). Bottom-3 get a re-plan mandate.
 
 ## Install
 
