@@ -244,6 +244,24 @@ Determine **PASS** vs **BLOCK**:
 If **PASS** → continue to Phase 6.
 If **BLOCK** → skip Phase 6. Include the full punch list in the summary report. Stop.
 
+### Phase 1 sub-rule — content selection comes from LIVE Jellyfin queries, not whitelists
+
+The rebuild agent does NOT use hardcoded series whitelists. For each channel, it reads `tools/channel-genres.json` ONLY for metadata-level filters (genre, era, path, exclusions) and queries Jellyfin fresh each rebuild.
+
+```
+For ch16 Anime:
+  rules = channel-genres.json["16"]
+  candidates = SELECT * FROM BaseItems
+                WHERE Type='Episode'
+                  AND (Genres LIKE '%Anime%' OR Path LIKE '%/Anime/%')
+                  AND <_global_exclusions applied>
+                  AND Path on a mounted volume
+```
+
+The agent reasons about the candidate pool with full library knowledge — no predetermined list of "approved series." Library evolves; the agent stays current.
+
+The audit reports any items where the agent's judgment placed something the genre filter wouldn't strictly match — those are advisory, not hard fails (the agent chose to deviate for variety or coverage).
+
 ### Phase 4.5 — Content audit (genre + holiday strictness)
 
 After playouts are written and bumpers spliced, before XMLTV regen:

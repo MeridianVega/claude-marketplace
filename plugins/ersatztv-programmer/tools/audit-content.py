@@ -184,19 +184,9 @@ def audit_channel(
                     "matched": hit,
                 })
 
-        # Check required series (whitelist)
-        req_series = rules.get("tv_required_series_or_paths", []) + \
-                     rules.get("movie_required_series_or_paths", []) + \
-                     rules.get("tv_required_series", [])
-        if req_series and series:
-            if not matches_substr(series, req_series) and not matches_substr(path, req_series):
-                violations.append({
-                    "channel": channel_num,
-                    "name": channel_name,
-                    "severity": "WARN",
-                    "kind": "not in series whitelist",
-                    "series": series,
-                })
+        # Whitelist-based "not in series whitelist" checks removed — channels no
+        # longer have hardcoded series whitelists. The rebuild agent picks from
+        # live Jellyfin queries against metadata filters in channel-genres.json.
 
     return violations
 
