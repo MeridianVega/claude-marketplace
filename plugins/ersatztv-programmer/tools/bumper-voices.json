@@ -1,0 +1,582 @@
+{
+  "_comment": "Per-channel bumper voice. Each channel has up to four pools the renderer mixes: 'deadpan' (personality lines, ~60%), 'up_next_template' (functional, ~30%, uses {title}/{subtitle}/{time}), 'block_summary_intro' (~10%, used at primetime start, follow-up text lists upcoming shows), and 'fallback' (used when no other content). Edit freely; renderer reloads on next run.",
+  "_mix": {
+    "deadpan_weight": 60,
+    "up_next_weight": 30,
+    "block_summary_weight": 10
+  },
+  "channels": {
+    "Primetime": {
+      "voice": "Premium TV. Says less, means more.",
+      "deadpan": [
+        "It's still on. You can change the channel. We won't be offended.",
+        "Quality TV. We're surprised too.",
+        "Tonight: something worth your time.",
+        "Pay attention.",
+        "We picked this on purpose."
+      ],
+      "up_next_template": "tonight's lineup continues\n{title}",
+      "block_summary_intro": "TONIGHT ON PRIMETIME"
+    },
+    "Background": {
+      "voice": "Comforting, low-key. The TV that's always on.",
+      "deadpan": [
+        "Welcome back.",
+        "Same time. Same place.",
+        "We're glad you're here.",
+        "Tonight: more of the usual. Just how you like it.",
+        "Volume optional."
+      ],
+      "up_next_template": "next up\n{title}",
+      "block_summary_intro": "TONIGHT IN THE BACKGROUND"
+    },
+    "Friends": {
+      "voice": "Sitcom-cheerful. Clap-clap-clap-clap.",
+      "deadpan": [
+        "Could this BE any more Friends?",
+        "Coffee shop. Always.",
+        "Pivot. PIVOT.",
+        "We were on a break.",
+        "Smelly Cat returns at the top of the hour."
+      ],
+      "up_next_template": "the one with\n{subtitle}",
+      "block_summary_intro": "TONIGHT, FRIENDS"
+    },
+    "Adult Animation": {
+      "voice": "Adult Swim. Irreverent, deadpan, exists.",
+      "deadpan": [
+        "We hope you get fired.",
+        "Channel 4. We exist.",
+        "Do you ever feel like a plastic bag?",
+        "Tomorrow: probably the same thing we played today.",
+        "Sometimes we cancel shows. We're sorry. Mostly.",
+        "Everything is fine.",
+        "Comedy. Allegedly.",
+        "You're going to die. Until then, watch this."
+      ],
+      "up_next_template": "next on the loop\n{title}",
+      "block_summary_intro": "tonight on channel four\nyou're welcome"
+    },
+    "Saturday Morning": {
+      "voice": "Wholesome, sing-songy, breakfast cereal.",
+      "deadpan": [
+        "Cereal not included.",
+        "Stay hydrated.",
+        "Don't tell your parents.",
+        "Saturday is back.",
+        "Eat before the commercials."
+      ],
+      "up_next_template": "and now\n{title}",
+      "block_summary_intro": "THIS MORNING ON SATURDAY MORNING"
+    },
+    "Action": {
+      "voice": "Testosterone. Exclamation points.",
+      "deadpan": [
+        "ACTION NEVER STOPS.",
+        "THINGS BLOW UP TONIGHT.",
+        "TURN IT UP.",
+        "BRING SNACKS.",
+        "EXPLOSIONS GUARANTEED."
+      ],
+      "up_next_template": "GETS BETTER\n{title}",
+      "block_summary_intro": "TONIGHT ON ACTION"
+    },
+    "Adventure": {
+      "voice": "Explorer's diary, slightly out of breath.",
+      "deadpan": [
+        "Pack a bag.",
+        "We're going somewhere.",
+        "Don't forget the map.",
+        "Tonight: a journey of some kind."
+      ],
+      "up_next_template": "next adventure\n{title}",
+      "block_summary_intro": "TONIGHT'S EXPEDITION"
+    },
+    "Comedy": {
+      "voice": "Friendly, easy-laugh.",
+      "deadpan": [
+        "It's funny. Probably.",
+        "Laugh whenever.",
+        "We brought jokes.",
+        "Something silly is on at {time}.",
+        "Smile. We can wait."
+      ],
+      "up_next_template": "next\n{title}",
+      "block_summary_intro": "TONIGHT, COMEDY"
+    },
+    "Drama": {
+      "voice": "Stoic. Prestige drama. Unsmiling.",
+      "deadpan": [
+        "Pay attention.",
+        "Tonight: a story worth your time.",
+        "Pour something. Sit down.",
+        "Real people. Made up.",
+        "Heavy."
+      ],
+      "up_next_template": "tonight\n{title}",
+      "block_summary_intro": "TONIGHT'S DRAMA"
+    },
+    "Family": {
+      "voice": "Warm, no edges, mom-approved.",
+      "deadpan": [
+        "Everyone is welcome.",
+        "Dinner can wait. Or join you.",
+        "Family time.",
+        "Tonight: something the whole house can watch."
+      ],
+      "up_next_template": "next on family\n{title}",
+      "block_summary_intro": "FAMILY NIGHT"
+    },
+    "Horror": {
+      "voice": "Atmospheric, uncomfortable, vaguely menacing.",
+      "deadpan": [
+        "Don't watch alone. We don't care if you do.",
+        "Your house is fine. Probably.",
+        "Something is in the next room. Always.",
+        "Lock the door. Or don't.",
+        "We saved the worst for tonight.",
+        "It's behind you."
+      ],
+      "up_next_template": "stay if you can\n{title}",
+      "block_summary_intro": "TONIGHT ON HORROR\nIT'S FINE"
+    },
+    "Romance": {
+      "voice": "Wistful, soft, slightly self-aware.",
+      "deadpan": [
+        "Love. It's complicated.",
+        "Tonight: another reason to cry.",
+        "Bring tissues.",
+        "Two people will eventually kiss.",
+        "Romance: still happening, somehow."
+      ],
+      "up_next_template": "tonight's love story\n{title}",
+      "block_summary_intro": "AN EVENING OF ROMANCE"
+    },
+    "Scifi": {
+      "voice": "Speculative, deadpan, slightly off-kilter.",
+      "deadpan": [
+        "The future is on Channel 13.",
+        "Tonight: probably not real.",
+        "We are not alone. Channel 13 is.",
+        "Time travels at the top of the hour.",
+        "Reality optional."
+      ],
+      "up_next_template": "next transmission\n{title}",
+      "block_summary_intro": "TONIGHT IN THE FUTURE"
+    },
+    "Western": {
+      "voice": "Drawl. Tumbleweeds. Slightly tired.",
+      "deadpan": [
+        "Howdy.",
+        "Coming up: a man and his horse.",
+        "Tumbleweed in five.",
+        "Saddle up.",
+        "Sunset at {time}."
+      ],
+      "up_next_template": "saddle up\n{title}",
+      "block_summary_intro": "TONIGHT ON THE FRONTIER"
+    },
+    "Documentary": {
+      "voice": "Measured. NPR-pledge-week.",
+      "deadpan": [
+        "Real things happened. We have proof.",
+        "Tonight: something true.",
+        "Knowledge is on at the hour.",
+        "Pay attention. There may be a quiz.",
+        "Reality, narrated."
+      ],
+      "up_next_template": "next subject\n{title}",
+      "block_summary_intro": "TONIGHT'S DOCUMENTARY"
+    },
+    "Anime": {
+      "voice": "Over-enthusiastic. All caps. Power of friendship.",
+      "deadpan": [
+        "OPENING THEME CONFIRMED.",
+        "It's anime night. You knew this.",
+        "BELIEVE IT.",
+        "POWER LEVEL: ELEVATED.",
+        "TONIGHT: FILLER ARC. MAYBE."
+      ],
+      "up_next_template": "next episode\n{title}",
+      "block_summary_intro": "TONIGHT, ANIME"
+    },
+    "Animated": {
+      "voice": "Cartoonish, saturated, family-shaped.",
+      "deadpan": [
+        "Cartoons.",
+        "All ages. Mostly.",
+        "Drawn by hand. Animated by computer.",
+        "Tonight: something colorful."
+      ],
+      "up_next_template": "more animation\n{title}",
+      "block_summary_intro": "TONIGHT'S TOONS"
+    },
+    "Cooking TV": {
+      "voice": "Easy, conversational, hungry.",
+      "deadpan": [
+        "Hungry?",
+        "We're cooking. You're watching.",
+        "Tonight: someone makes something. It looks good.",
+        "Recipe not included.",
+        "Salt to taste."
+      ],
+      "up_next_template": "now cooking\n{title}",
+      "block_summary_intro": "TONIGHT IN THE KITCHEN"
+    },
+    "Nature": {
+      "voice": "Calm, observational, faintly British.",
+      "deadpan": [
+        "The forest is doing fine.",
+        "Bird, observed.",
+        "Tonight: animals being animals.",
+        "Nature continues.",
+        "Sit still. Watch."
+      ],
+      "up_next_template": "continuing\n{title}",
+      "block_summary_intro": "TONIGHT IN NATURE"
+    },
+    "Disney & Pixar": {
+      "voice": "Wide-eyed, hopeful, slight orchestra swell.",
+      "deadpan": [
+        "Believe.",
+        "There's a song coming.",
+        "Tonight: a story with feelings.",
+        "Bring a tissue. Maybe two."
+      ],
+      "up_next_template": "next on disney\n{title}",
+      "block_summary_intro": "TONIGHT, MAGIC"
+    },
+    "Ghibli": {
+      "voice": "Quiet wonder. Studio-orchestra calm.",
+      "deadpan": [
+        "Look at the sky.",
+        "Tonight: something beautiful.",
+        "Hisaishi at the hour.",
+        "Slow down."
+      ],
+      "up_next_template": "stay a while\n{title}",
+      "block_summary_intro": "TONIGHT ON GHIBLI"
+    },
+    "Nickelodeon": {
+      "voice": "90s slime, loud, irreverent kids.",
+      "deadpan": [
+        "GET SLIMED.",
+        "We dare you to look away.",
+        "TONIGHT: probably Doug. We'll see.",
+        "ORANGE EVERYWHERE."
+      ],
+      "up_next_template": "now on nick\n{title}",
+      "block_summary_intro": "TONIGHT ON NICK"
+    },
+    "Cartoon Network": {
+      "voice": "Daytime CN energy + Adult Swim late-night.",
+      "deadpan": [
+        "Cartoon Network.",
+        "We're on. It's fine.",
+        "Tonight: cartoons, then weirder cartoons.",
+        "Don't tell anyone."
+      ],
+      "up_next_template": "more on CN\n{title}",
+      "block_summary_intro": "tonight on cartoon network"
+    },
+    "HBO Style": {
+      "voice": "Pretentious. Tasteful. White-on-black serif.",
+      "deadpan": [
+        "An evening of prestige.",
+        "Tonight: peak television. Probably.",
+        "The cinema of the small screen.",
+        "Award-bait at {time}.",
+        "It's about something."
+      ],
+      "up_next_template": "tonight's feature\n{title}",
+      "block_summary_intro": "TONIGHT'S PROGRAMMING"
+    },
+    "The Vault": {
+      "voice": "Old-world. Gravitas. Cigar in the next room.",
+      "deadpan": [
+        "From the archive.",
+        "Tonight, cinema. Properly.",
+        "Black and white. As intended.",
+        "Quiet, please."
+      ],
+      "up_next_template": "tonight's feature\n{title}",
+      "block_summary_intro": "TONIGHT IN THE VAULT"
+    },
+    "Classic Cinema": {
+      "voice": "Stately. Slight crackle.",
+      "deadpan": [
+        "Tonight, something old. And good.",
+        "They don't make them like this. Anymore.",
+        "Reel one. Top of the hour.",
+        "Watch it as it was."
+      ],
+      "up_next_template": "tonight's feature\n{title}",
+      "block_summary_intro": "TONIGHT, CINEMA"
+    },
+    "80s Rewind": {
+      "voice": "Neon nostalgia. Mall arcade. VCR clicking.",
+      "deadpan": [
+        "It's still the eighties somewhere.",
+        "TUBULAR.",
+        "Be kind. Rewind.",
+        "Hair: BIG. Synth: BIGGER.",
+        "Channel changer in the couch cushions."
+      ],
+      "up_next_template": "throwback time\n{title}",
+      "block_summary_intro": "TONIGHT IN THE EIGHTIES"
+    },
+    "90s Throwback": {
+      "voice": "Irreverent, half-grunge, slightly aware of mortality.",
+      "deadpan": [
+        "We're not your dad.",
+        "Mountain Dew Code Red.",
+        "TGIF. Even on Tuesday.",
+        "AOL says hello.",
+        "Tonight: nineties content."
+      ],
+      "up_next_template": "throwback time\n{title}",
+      "block_summary_intro": "TONIGHT, THE 90S"
+    },
+    "2000s Replay": {
+      "voice": "Y2K clean. Pop-punk and frosted tips.",
+      "deadpan": [
+        "It's complicated. \u2014 Facebook",
+        "Tonight on cable: nostalgia.",
+        "MySpace top 8.",
+        "Tonight: peak millennium content."
+      ],
+      "up_next_template": "throwback time\n{title}",
+      "block_summary_intro": "TONIGHT IN THE 2000S"
+    },
+    "Now Showing": {
+      "voice": "Modern, urgent. Neon yellow.",
+      "deadpan": [
+        "What's new is on now.",
+        "Hot off the rip.",
+        "Recent. Tonight.",
+        "Don't sleep on this."
+      ],
+      "up_next_template": "screening\n{title}",
+      "block_summary_intro": "WHAT'S ON NOW"
+    },
+    "24/7 Wrestling": {
+      "voice": "Hype. All caps. Catchphrases.",
+      "deadpan": [
+        "STILL WRESTLING.",
+        "BAH GAWD.",
+        "IT NEVER STOPS BEING WRESTLING.",
+        "AND HIS NAME IS \u2014",
+        "IT'S WRESTLING. ALWAYS."
+      ],
+      "up_next_template": "NEXT \u2014 {title}",
+      "block_summary_intro": "STILL WRESTLING"
+    },
+    "Wildcard": {
+      "voice": "Mood-of-the-month. Whatever this rotation says.",
+      "deadpan": [
+        "This month: trying something.",
+        "Don't get too attached.",
+        "Wildcard. Always wildcard."
+      ],
+      "up_next_template": "next\n{title}",
+      "block_summary_intro": "THIS MONTH ON WILDCARD"
+    },
+    "Director Spotlight": {
+      "voice": "Cinephile. Slightly insufferable.",
+      "deadpan": [
+        "An auteur, this month.",
+        "We'll explain it later.",
+        "Frame composition: noted."
+      ],
+      "up_next_template": "next feature\n{title}",
+      "block_summary_intro": "TONIGHT'S DIRECTOR"
+    },
+    "Studio Spotlight": {
+      "voice": "Corporate marquee. Briefcase energy.",
+      "deadpan": [
+        "Studio spotlight.",
+        "We picked one. It's that one.",
+        "All month: their stuff."
+      ],
+      "up_next_template": "next feature\n{title}",
+      "block_summary_intro": "TONIGHT'S STUDIO"
+    },
+    "Decade Deep Dive": {
+      "voice": "Time-period pedant.",
+      "deadpan": [
+        "Setting the dial back.",
+        "All month: one half-decade.",
+        "Don't ask which one. Watch."
+      ],
+      "up_next_template": "next\n{title}",
+      "block_summary_intro": "TONIGHT IN THE PAST"
+    },
+    "Genre Sampler": {
+      "voice": "Eclectic, indie record-store clerk.",
+      "deadpan": [
+        "Niche, this month.",
+        "You probably haven't heard of it.",
+        "Subgenre confirmed."
+      ],
+      "up_next_template": "next\n{title}",
+      "block_summary_intro": "TONIGHT'S NICHE"
+    },
+    "Forgotten Greats": {
+      "voice": "Vintage typewriter. Slightly bitter about taste.",
+      "deadpan": [
+        "Nobody watched this. They were wrong.",
+        "Forgotten. Now remembered.",
+        "Tonight: you should know about this."
+      ],
+      "up_next_template": "next\n{title}",
+      "block_summary_intro": "TONIGHT \u2014 REMEMBERED"
+    },
+    "Actor Carousel": {
+      "voice": "Marquee tribute. Handprints in concrete.",
+      "deadpan": [
+        "All month: one face.",
+        "They're in everything tonight.",
+        "Acting at the top of the hour."
+      ],
+      "up_next_template": "next\n{title}",
+      "block_summary_intro": "TONIGHT'S MARQUEE"
+    },
+    "Mood Board": {
+      "voice": "Dreamy, moody, art-school.",
+      "deadpan": [
+        "A mood, this month.",
+        "Tonight: feelings, on screen.",
+        "Vibe: confirmed."
+      ],
+      "up_next_template": "next\n{title}",
+      "block_summary_intro": "TONIGHT'S MOOD"
+    },
+    "Soundtrack Cinema": {
+      "voice": "Vinyl-club enthusiasm.",
+      "deadpan": [
+        "The music, also: good.",
+        "Tonight: songs, with movie attached.",
+        "Side B in five."
+      ],
+      "up_next_template": "next\n{title}",
+      "block_summary_intro": "TONIGHT, ON THE SOUNDTRACK"
+    },
+    "TV Showcase": {
+      "voice": "Classic-TV reverent.",
+      "deadpan": [
+        "All month: one series.",
+        "Tonight: episode in sequence.",
+        "Made-for-TV. Properly."
+      ],
+      "up_next_template": "next feature\n{title}",
+      "block_summary_intro": "TONIGHT'S SHOWCASE"
+    },
+    "The Lab": {
+      "voice": "Pretentious format-experiment.",
+      "deadpan": [
+        "Format experiment in progress.",
+        "Tonight: something we made up this week.",
+        "Don't ask. Watch.",
+        "We don't know what this is either."
+      ],
+      "up_next_template": "next feature\n{title}",
+      "block_summary_intro": "TONIGHT IN THE LAB"
+    },
+    "Skunk Works": {
+      "voice": "Classified. Low-key paranoid.",
+      "deadpan": [
+        "Mission ongoing.",
+        "Don't repeat what you saw.",
+        "Asset deployed. Watching.",
+        "Eyes only. Open."
+      ],
+      "up_next_template": "next\n{title}",
+      "block_summary_intro": "OPERATIONAL TONIGHT"
+    },
+    "The Workshop": {
+      "voice": "Handcrafted. Sleeves rolled up.",
+      "deadpan": [
+        "Built this week.",
+        "Tonight: assembled, with care.",
+        "Tools: present. Plan: loose."
+      ],
+      "up_next_template": "next feature\n{title}",
+      "block_summary_intro": "TONIGHT'S BUILD"
+    },
+    "Channel X": {
+      "voice": "Mysterious, withholding.",
+      "deadpan": [
+        "...",
+        "We're not telling.",
+        "Channel X.",
+        "Tonight: unknown. By design."
+      ],
+      "up_next_template": "next\n{title}",
+      "block_summary_intro": "TONIGHT \u2014 UNDISCLOSED"
+    },
+    "Field Test": {
+      "voice": "Beta-stage tech. Slightly broken.",
+      "deadpan": [
+        "BETA: ENGAGED.",
+        "Tonight: in testing.",
+        "Bugs welcome.",
+        "Build: NIGHTLY."
+      ],
+      "up_next_template": "next\n{title}",
+      "block_summary_intro": "TONIGHT IN THE FIELD"
+    },
+    "Off Format": {
+      "voice": "Contrarian. Anti-broadcast.",
+      "deadpan": [
+        "Wrong on purpose.",
+        "Format broken. Watch anyway.",
+        "Tonight: not what you expected.",
+        "Different. By design."
+      ],
+      "up_next_template": "next\n{title}",
+      "block_summary_intro": "TONIGHT, OFF FORMAT"
+    },
+    "The Edit Bay": {
+      "voice": "Crafted. Supervised.",
+      "deadpan": [
+        "Cut together this week.",
+        "Tonight: edited, with intention.",
+        "Tape rolls at the hour."
+      ],
+      "up_next_template": "next\n{title}",
+      "block_summary_intro": "TONIGHT IN THE EDIT BAY"
+    },
+    "The Outpost": {
+      "voice": "Rugged. Far from convention.",
+      "deadpan": [
+        "Far from the rest.",
+        "Tonight: out here.",
+        "No signal. We made one."
+      ],
+      "up_next_template": "next\n{title}",
+      "block_summary_intro": "TONIGHT AT THE OUTPOST"
+    },
+    "Curveball": {
+      "voice": "Deliberately surprising.",
+      "deadpan": [
+        "Curveball, incoming.",
+        "Tonight: something unexpected.",
+        "Surprise.",
+        "We changed our minds again."
+      ],
+      "up_next_template": "next\n{title}",
+      "block_summary_intro": "TONIGHT'S CURVE"
+    },
+    "One Night Only": {
+      "voice": "Marquee. Tonight only.",
+      "deadpan": [
+        "ONE NIGHT ONLY.",
+        "Tonight, then gone.",
+        "Catch it now.",
+        "Last call."
+      ],
+      "up_next_template": "next\n{title}",
+      "block_summary_intro": "TONIGHT \u2014 ONE NIGHT ONLY"
+    }
+  }
+}
