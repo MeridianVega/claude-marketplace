@@ -425,66 +425,85 @@ def _render_card_png(
     logo_y: int = 140,
     logo_w: int = 280,
 ) -> bool:
-    """Compose the card image entirely in PIL — gradient + vignette + logo + text. ~50-100x faster than ffmpeg drawtext."""
+    """Adult Swim minimal: solid black background, one deadpan voice line in
+    clean white Helvetica-ish bold, that's it. No logo, no channel mark, no
+    gradient. The line is the bumper."""
     from PIL import Image, ImageDraw, ImageFont
-    W, H = 1920, 1080
-    fp = font_path_for(brand)
+    W, H = 1280, 720
 
-    # Background gradient
-    bg_top = _hex_to_rgb(brand["stroke"])
-    bg_bot = (10, 10, 10)
-    img = _vertical_gradient_fast(W, H, bg_top, bg_bot)
-    img = _apply_vignette(img)
+    # Solid near-black background — Adult Swim signature
+    img = Image.new("RGB", (W, H), (10, 10, 10))
 
-    # Logo
-    if _has_logo(channel_num):
-        try:
-            logo = Image.open(LOGOS_DIR / f"{channel_num}.png").convert("RGBA")
-            ratio = logo_w / logo.size[0]
-            logo = logo.resize((logo_w, int(logo.size[1] * ratio)), Image.LANCZOS)
-            lx = (W - logo_w) // 2
-            img.paste(logo, (lx, logo_y), logo)
-        except (OSError, ValueError):
-            pass
+    # Pick the boldest sans-serif we have for that Helvetica-bold feel
+    # Order of preference for Adult Swim vibe: Archivo Black > Tomorrow Bold > BebasNeue > anything bold
+    candidates = ["ArchivoBlack-Regular.ttf", "Tomorrow-Bold.ttf",
+                  "BebasNeue-Regular.ttf", "Inter-Bold.ttf", "Oswald-Bold.ttf"]
+    font_path = None
+    for c in candidates:
+        p = FONTS_DIR / c
+        if p.is_file():
+            font_path = p
+            break
+    if font_path is None:
+        font_path = font_path_for(brand)
 
-    # Channel mark (small with semi-transparent black box behind)
     img = img.convert("RGBA")
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    od = ImageDraw.Draw(overlay)
-    try:
-        small_font = ImageFont.truetype(str(fp), 28)
-    except OSError:
-        small_font = ImageFont.load_default()
-    bbox = od.textbbox((0, 0), channel_mark, font=small_font)
-    tw = bbox[2] - bbox[0]
-    th = bbox[3] - bbox[1]
-    cm_x = (W - tw) // 2
-    cm_y = 64
-    od.rounded_rectangle(
-        [cm_x - 14 - bbox[0], cm_y - 8 - bbox[1], cm_x + tw + 14 - bbox[0], cm_y + th + 8 - bbox[1]],
-        radius=6, fill=(0, 0, 0, 90),
-    )
-    od.text((cm_x - bbox[0], cm_y - bbox[1]), channel_mark, font=small_font, fill=brand["fill"])
-    img = Image.alpha_composite(img, overlay)
+    td = ImageDraw.Draw(overlay)
 
-    # Text layers
-    img = img.convert("RGBA")
-    text_overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    td = ImageDraw.Draw(text_overlay)
-    fg_rgb = _hex_to_rgb(brand["fill"])
-    for layer in text_layers:
-        try:
-            f = ImageFont.truetype(str(fp), layer.size)
-        except OSError:
-            f = ImageFont.load_default()
-        alpha = int(255 * max(0.0, min(1.0, layer.opacity)))
-        fill = fg_rgb + (alpha,)
-        bbox = td.textbbox((0, 0), layer.text, font=f)
+    # Pure white text — Adult Swim spec
+    fg = (255, 255, 255, 255)
+
+    # Find the PRIMARY text layer (the deadpan voice line) — the one with the
+    # biggest font size in the input list. Drop everything else.
+    if not text_layers:
+        img.save(out_png, "PNG", compress_level=1)
+        return True
+    primary = max(text_layers, key=lambda L: L.size)
+
+    # Render the primary line. Adult Swim does it lowercase, often.
+    text = primary.text.lower()
+
+    # Word-wrap the line to ~22 chars; max 4 rows.
+    words = text.split()
+    rows: list[str] = []
+    current = ""
+    for w in words:
+        if len(current) + 1 + len(w) > 22 and current:
+            rows.append(current)
+            current = w
+        else:
+            current = (current + " " + w).strip()
+    if current:
+        rows.append(current)
+    rows = rows[:4]
+
+    # Big size scaled to row count + 720p canvas
+    size = 110 if len(rows) <= 2 else 88 if len(rows) == 3 else 70
+    try:
+        f = ImageFont.truetype(str(font_path), size)
+    except OSError:
+        f = ImageFont.load_default()
+
+    # Center the block vertically
+    line_h = int(size * 1.15)
+    block_h = line_h * len(rows)
+    base_y = (H - block_h) // 2
+
+    for i, row in enumerate(rows):
+        bbox = td.textbbox((0, 0), row, font=f)
         tw = bbox[2] - bbox[0]
-        th = bbox[3] - bbox[1]
         x = (W - tw) // 2
-        td.text((x - bbox[0], layer.y - bbox[1]), layer.text, font=f, fill=fill)
-    img = Image.alpha_composite(img, text_overlay).convert("RGB")
+        y = base_y + i * line_h
+        td.text((x - bbox[0], y - bbox[1]), row, font=f, fill=fg)
+
+    # Tiny brand color stripe at the bottom — that's the only "branding"
+    # (Adult Swim has the [as] logo bottom-right; we use a 4px color line)
+    stripe_color = _hex_to_rgb(brand.get("stroke") or "#FFFFFF")
+    sd = ImageDraw.Draw(overlay)
+    sd.rectangle([0, H - 4, W, H], fill=stripe_color + (255,))
+
+    img = Image.alpha_composite(img, overlay).convert("RGB")
     img.save(out_png, "PNG", optimize=False, compress_level=1)
     return True
 
